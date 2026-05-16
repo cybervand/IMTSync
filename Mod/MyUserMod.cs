@@ -11,11 +11,13 @@ namespace CSM.IMTSync.Mod
         public void OnEnabled()
         {
             Log.Info($"v{ModMetadata.Version} enabled.");
+            LogOverlay.EnsureCreated();
         }
 
         public void OnDisabled()
         {
             Log.Info("disabled.");
+            LogOverlay.Destroy();
         }
     }
 }

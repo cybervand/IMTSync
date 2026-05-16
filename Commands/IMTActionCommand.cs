@@ -33,5 +33,10 @@ namespace CSM.IMTSync.Commands
 
         // Alignment for AddRegularLine and AddNormalLine. (IMT.Manager.Alignment enum)
         [ProtoMember(8)] public byte Alignment;
+
+        // For AddFiller: per-contour-vertex alignment (parallel array to Contour). v1 only supports
+        // contours made of EnterFillerVertex (the common user-click case); each entry pairs with
+        // the same-index PointRef in Contour.
+        [ProtoMember(9)] public byte[] ContourAlignments;
     }
 }

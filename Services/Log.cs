@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using CSM.IMTSync.Mod;
 
@@ -19,6 +20,22 @@ namespace CSM.IMTSync.Services
         private static bool _resolveOk;
         private static bool _truncatedThisSession;  // first write per game session truncates the file
 
+        // In-memory ring buffer of the most recent log lines, exposed to the in-game overlay.
+        private const int RingCapacity = 200;
+        private static readonly LinkedList<string> _ring = new LinkedList<string>();
+
+        /// <summary>Snapshot of the most recent log lines (oldest first). Thread-safe copy.</summary>
+        public static string[] RecentLines()
+        {
+            lock (_gate)
+            {
+                var arr = new string[_ring.Count];
+                int i = 0;
+                foreach (var s in _ring) arr[i++] = s;
+                return arr;
+            }
+        }
+
         public static void Info(string message)  => Write("INFO",  message);
         public static void Warn(string message)  => Write("WARN",  message);
         public static void Error(string message) => Write("ERROR", message);
@@ -35,6 +52,13 @@ namespace CSM.IMTSync.Services
 
             // Always mirror to Unity's output_log first so we have a fallback if file write fails
             try { UnityEngine.Debug.Log(line); } catch { }
+
+            // Append to in-memory ring buffer for the in-game overlay
+            lock (_gate)
+            {
+                _ring.AddLast(line);
+                while (_ring.Count > RingCapacity) _ring.RemoveFirst();
+            }
 
             lock (_gate)
             {
