@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+*~
+
+# Local config
+*.local.props
+local.settings.json

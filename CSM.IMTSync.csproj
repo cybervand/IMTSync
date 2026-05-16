@@ -1,0 +1,104 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net35</TargetFramework>
+    <AssemblyName>CSM.IMTSync</AssemblyName>
+    <RootNamespace>CSM.IMTSync</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <NoWarn>CS1591;NU1701</NoWarn>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>portable</DebugType>
+    <Deterministic>true</Deterministic>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+
+    <!-- Path to the Cities Skylines installation (override per machine if different) -->
+    <CitiesSkylinesPath Condition="'$(CitiesSkylinesPath)' == ''">M:\Games\Cities Skylines</CitiesSkylinesPath>
+    <CSManagedPath>$(CitiesSkylinesPath)\Cities_Data\Managed</CSManagedPath>
+    <CSModsPath>$(CitiesSkylinesPath)\Files\Mods</CSModsPath>
+    <CSWorkshopPath>D:\SteamLibrary\steamapps\workshop\content\255710</CSWorkshopPath>
+
+    <!-- Where the built DLL should land for in-game testing -->
+    <ModInstallPath>$(CSModsPath)\IMTSync</ModInstallPath>
+    <!-- Second CS install (the multiplayer client). Host installs to ModInstallPath above. -->
+    <ClientInstallPath>M:\Games\C_S2\Cities Skylines\Files\Mods\IMTSync</ClientInstallPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Provides reference assemblies for net35 (so we don't need the .NET 3.5 SDK installed system-wide) -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net35" Version="1.0.3" PrivateAssets="all" />
+    <!-- protobuf-net is bundled with CSM; we use its attributes ([ProtoContract]/[ProtoMember]) -->
+    <!-- We don't ship our own copy — reference the one CSM ships -->
+  </ItemGroup>
+
+  <ItemGroup Label="Cities Skylines core (do NOT copy to output — game already has these)">
+    <Reference Include="UnityEngine">
+      <HintPath>$(CSManagedPath)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(CSManagedPath)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ColossalManaged">
+      <HintPath>$(CSManagedPath)\ColossalManaged.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ICities">
+      <HintPath>$(CSManagedPath)\ICities.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Label="CSM (Cities Skylines Multiplayer) — workshop ID 1558438291">
+    <Reference Include="CSM.API">
+      <HintPath>$(CSWorkshopPath)\1558438291\CSM.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="protobuf-net">
+      <HintPath>$(CSWorkshopPath)\1558438291\protobuf-net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Label="Harmony 2 (CitiesHarmony) — runtime in workshop 2040656402, API stub bundled per-mod">
+    <!-- The CitiesHarmony.API stub is shipped inside each mod that uses it; we reference IMT's copy -->
+    <Reference Include="CitiesHarmony.API">
+      <HintPath>$(CSWorkshopPath)\2140418403\CitiesHarmony.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- The actual Harmony runtime ships from CitiesHarmony workshop mod -->
+    <Reference Include="CitiesHarmony.Harmony">
+      <HintPath>$(CSModsPath)\2040656402\CitiesHarmony.Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Label="Intersection Marking Tool — workshop ID 2140418403">
+    <Reference Include="IntersectionMarkingTool">
+      <HintPath>$(CSWorkshopPath)\2140418403\IntersectionMarkingTool.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="IntersectionMarkingTool.API">
+      <HintPath>$(CSWorkshopPath)\2140418403\IntersectionMarkingTool.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Post-build: copy the output DLL to BOTH Cities Skylines installs for in-game testing -->
+  <Target Name="DeployToCS" AfterTargets="Build">
+    <!-- Host install -->
+    <MakeDir Directories="$(ModInstallPath)" Condition="!Exists('$(ModInstallPath)') AND Exists('$(CSModsPath)')" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModInstallPath)" SkipUnchangedFiles="true" Condition="Exists('$(CSModsPath)')" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ModInstallPath)" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)$(TargetName).pdb') AND Exists('$(CSModsPath)')" />
+    <Message Text="Deployed → $(ModInstallPath)" Importance="high" Condition="Exists('$(CSModsPath)')" />
+
+    <!-- Client install -->
+    <MakeDir Directories="$(ClientInstallPath)" Condition="!Exists('$(ClientInstallPath)') AND Exists('M:\Games\C_S2\Cities Skylines')" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ClientInstallPath)" SkipUnchangedFiles="true" Condition="Exists('M:\Games\C_S2\Cities Skylines')" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ClientInstallPath)" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)$(TargetName).pdb') AND Exists('M:\Games\C_S2\Cities Skylines')" />
+    <Message Text="Deployed → $(ClientInstallPath)" Importance="high" Condition="Exists('M:\Games\C_S2\Cities Skylines')" />
+  </Target>
+
+</Project>
