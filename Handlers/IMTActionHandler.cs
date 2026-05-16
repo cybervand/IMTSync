@@ -3,6 +3,10 @@ using CSM.API.Commands;
 using CSM.IMTSync.Commands;
 using CSM.IMTSync.Services;
 using IMT.API;
+using IMT.Manager;
+using ModsCommon;
+// Alignment exists in both IMT.API and IMT.Manager - we use the Manager one (the patch sees it).
+using Alignment = IMT.Manager.Alignment;
 
 namespace CSM.IMTSync.Handlers
 {
@@ -16,7 +20,7 @@ namespace CSM.IMTSync.Handlers
         {
             if (cmd == null) { Log.Warn("Handle called with null command"); return; }
 
-            // Diagnostic - log EVERY incoming command before doing anything else, so two-PC tests
+            // Diagnostic - log every incoming command before doing anything else, so two-PC tests
             // can distinguish "packet arrived" from "applied correctly".
             Log.Info($"RECV from sender {cmd.SenderId}: {cmd.Type} on {cmd.Scope} {cmd.MarkingId}");
 
@@ -37,8 +41,12 @@ namespace CSM.IMTSync.Handlers
                             ApplyClear(provider, cmd);
                             break;
 
+                        case IMTActionType.AddRegularLine:
+                            ApplyAddRegularLine(cmd);
+                            break;
+
                         default:
-                            Log.Warn($"Unhandled IMTActionType: {cmd.Type} (Phase 1 only handles ClearMarking)");
+                            Log.Warn($"Unhandled IMTActionType: {cmd.Type}");
                             break;
                     }
                 }
@@ -61,10 +69,6 @@ namespace CSM.IMTSync.Handlers
                     }
                     else
                     {
-                        // No-op: this client doesn't have a marking on that node yet.
-                        // Common in Phase 1 because we don't sync AddRegularLine etc., so the
-                        // client can't have markings the host didn't share. Will become rare
-                        // once Phase 2 ships the Add patches.
                         Log.Info($"Skipped ClearMarking on node {cmd.MarkingId} - no marking exists on this client (no-op).");
                     }
                     break;
@@ -81,6 +85,52 @@ namespace CSM.IMTSync.Handlers
                     }
                     break;
             }
+        }
+
+        /// <summary>
+        /// Receive AddRegularLine. Uses internal IMT.Manager types because:
+        ///   1. The patch is on Marking.AddRegularLine (internal), so we have type access already.
+        ///   2. Constructing an IRegularLineStyleData from XML through the API is awkward; using
+        ///      the internal Style.FromXml&lt;RegularLineStyle&gt; is direct.
+        ///   3. MarkingPointPair takes internal MarkingPoint, not IEntrancePointData.
+        /// </summary>
+        private static void ApplyAddRegularLine(IMTActionCommand cmd)
+        {
+            // Find the internal Marking instance via the per-type singleton manager.
+            // (ModsCommon.SingletonManager<T>; method is GetOrCreateMarking, not GetOrCreate.)
+            Marking marking = null;
+            if (cmd.Scope == MarkingScope.Node)
+                marking = SingletonManager<NodeMarkingManager>.Instance.GetOrCreateMarking(cmd.MarkingId);
+            else if (cmd.Scope == MarkingScope.Segment)
+                marking = SingletonManager<SegmentMarkingManager>.Instance.GetOrCreateMarking(cmd.MarkingId);
+
+            if (marking == null)
+            {
+                Log.Warn($"AddRegularLine: could not GetOrCreate marking on {cmd.Scope} {cmd.MarkingId}");
+                return;
+            }
+
+            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.A, out var startPt))
+            {
+                Log.Warn($"AddRegularLine: could not resolve start point ({cmd.A.EntranceId}/{cmd.A.Index})");
+                return;
+            }
+            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.B, out var endPt))
+            {
+                Log.Warn($"AddRegularLine: could not resolve end point ({cmd.B.EntranceId}/{cmd.B.Index})");
+                return;
+            }
+
+            if (!StyleSerializer.TryFromXml<RegularLineStyle>(cmd.StyleXml, out var style))
+            {
+                Log.Warn("AddRegularLine: failed to parse style XML");
+                return;
+            }
+
+            var pair = new MarkingPointPair(startPt, endPt);
+            var alignment = (Alignment)cmd.Alignment;
+            marking.AddRegularLine(pair, style, alignment);
+            Log.Info($"Applied remote AddRegularLine on {cmd.Scope} {cmd.MarkingId}");
         }
     }
 }

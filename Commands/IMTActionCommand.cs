@@ -6,8 +6,6 @@ namespace CSM.IMTSync.Commands
     /// <summary>
     /// Single polymorphic command for all low-frequency IMT mutations.
     /// Fields not relevant to a given <see cref="Type"/> are left at default values.
-    /// Phase 1 only uses Type, Scope, MarkingId for ClearMarking.
-    /// Later phases will populate A, B, Contour, StyleXml, Alignment.
     ///
     /// Wire-format rule: only ever APPEND new ProtoMember tags. Never reuse a tag for a different
     /// field. Adding a field at a higher tag is safe across versions.
@@ -15,21 +13,25 @@ namespace CSM.IMTSync.Commands
     [ProtoContract]
     public class IMTActionCommand : CommandBase
     {
-        [ProtoMember(1)]
-        public IMTActionType Type;
+        [ProtoMember(1)] public IMTActionType Type;
+        [ProtoMember(2)] public MarkingScope Scope;
+        [ProtoMember(3)] public ushort MarkingId;
 
-        [ProtoMember(2)]
-        public MarkingScope Scope;
+        // Endpoints. Used by AddRegularLine/AddNormalLine/AddStopLine/AddLaneLine/AddCrosswalkLine
+        // and the matching Remove* commands.
+        [ProtoMember(4)] public PointRef A;
+        [ProtoMember(5)] public PointRef B;
 
-        [ProtoMember(3)]
-        public ushort MarkingId;
+        // Multi-point contour. Used by AddFiller (3+ points) and RemoveFiller (lookup by contour).
+        [ProtoMember(6)] public PointRef[] Contour;
 
-        // Reserved for Phase 2 (line endpoints, contour, style XML, alignment).
-        // Left as comments here so the tag numbering is documented:
-        // [ProtoMember(4)] public PointRef A;
-        // [ProtoMember(5)] public PointRef B;
-        // [ProtoMember(6)] public PointRef[] Contour;
-        // [ProtoMember(7)] public string StyleXml;
-        // [ProtoMember(8)] public byte Alignment;
+        // Style serialization - the entire <Style ... /> XML chunk produced by IMT's own
+        // Style.ToXml(). Receiver parses it back via Style.FromXml<T>(...).
+        // We embed XML rather than re-modeling all ~40 IMT style types in protobuf - cheap and
+        // robust to IMT updates.
+        [ProtoMember(7)] public string StyleXml;
+
+        // Alignment for AddRegularLine and AddNormalLine. (IMT.Manager.Alignment enum)
+        [ProtoMember(8)] public byte Alignment;
     }
 }
