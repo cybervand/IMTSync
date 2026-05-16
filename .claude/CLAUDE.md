@@ -153,6 +153,7 @@ Read it for the phase ordering, design rationale, and known risks.
 | `0ffbca7` | Phase 2.2 | AddRegularLine sync — proved style XML round-trip + point resolution end-to-end |
 | `5696976` | Phase 2.4+2.5 | Full Add/Remove surface (NormalLine, StopLine, LaneLine, CrosswalkLine, Filler), ResetOffsets, in-game log overlay |
 | `cf6def5` | .claude scaffold | `.claude/CLAUDE.md` + `.claude/memory/` for next session |
+| `daff3f2` | Phase 2.6 + Tier 1/2 | Style edit sync (Line/Filler/Crosswalk via StyleChanged taps), SetPointOffset, Filler v2 (Enter/LineEnd/Intersect), Tier 2 LWW versioning with tombstones, Tier 1 presence (SelectIntersection chat + claim rings + entrance-point dots), CursorPresence via CSM PCM, docs/IMT-INTERNALS.md + revised docs/TODO.md |
 
 ## What's pending
 
@@ -180,23 +181,6 @@ Top-of-list:
    `SingletonManager<NodeMarkingManager>.Instance` (it's `IEnumerable`), `ToXml()` each, broadcast.
    Receiver applies via `FromXml(Version, xml, new ObjectsMap(), needUpdate:true)` —
    `VersionMigration` auto-handles cross-version.
-
-## Working-tree (uncommitted) progress
-
-The DLL deployed to both game installs is significantly ahead of the last commit. This session
-landed (built clean, partially in-game-verified):
-
-| Feature | Wire | Patches | Notes |
-| --- | --- | --- | --- |
-| **SetPointOffset** | `[ProtoMember(10)] float Offset` | `DragPointToolMode.OnMouseUp` + `PointsEditor.OffsetChanged` | Built clean, in-game test pending |
-| **Filler v2** | `[ProtoMember(11)] FillerVertexRef[] Vertices` + new `FillerVertexRef` struct | `Marking_AddFiller_Patch` rewritten to use `FillerVertexConverter` polymorphic vertex extraction (Enter / LineEnd / Intersect) | Receiver-side LineEnd uses `marking.TryGetLine(MarkingPointPair, out)` |
-| **Style edit sync** | New action types `UpdateLineStyle=40`, `UpdateFillerStyle=41`, `UpdateCrosswalkStyle=42`; reuses `StyleXml` field | `MarkingFiller.StyleChanged` + `MarkingCrosswalk.StyleChanged` + `MarkingLineRawRule.StyleChanged` (all private, string-name HarmonyPatch) | First rule only on lines; multi-rule deferred |
-| **Tier 2 LWW versioning** | `[ProtoMember(12)] ulong Version`; new `Services/EditClock.cs` with element-string→stamp dict, Lamport bump on receive, tombstones, marking purge on Clear | Auto-stamp on `CsmBridge.SendToAll(IMTActionCommand)`; gate at top of `Handle()` | Concurrent edits converge LWW |
-| **Tier 1 — SelectIntersection (chat)** | `SelectIntersection=50` + `[ProtoMember(13)] string ClaimantName` | `IntersectionMarkingTool.SetMarking(Marking)` postfix | Prints to CSM chat via `Chat.Instance.PrintGameMessage(...)` |
-| **Tier 1 — visual ring + entrance dots** | (no new wire fields) | Render postfix on `IntersectionMarkingTool.RenderOverlay(CameraInfo)` | Force-loads marking via `GetOrCreateMarking` so entrance dots render even if local user hasn't visited |
-| **Tier β — CursorPresence** | `CursorPresence=60` + `[ProtoMember(14..16)] float CursorX/Y/Z` | Same `RenderOverlay` postfix, throttled 10 Hz + 10 cm threshold | Routes to `ToolSimulatorCursorManager.GetCursorView(senderId)` + `pcm.SetCursor(null)` + `SetLabelContent(name, pos)` — native CSM cursor rendering |
-| **PresenceStore + EditClock** | (services) | n/a | `Services/PresenceStore.cs` (per-sender claim dict, player-color palette, NetManager world-pos lookup); `Services/EditClock.cs` |
-| **csproj reference** | n/a | n/a | Added `CSM.BaseGame.dll` reference (needed for ToolSimulatorCursorManager) |
 
 ## Known bugs / mitigations
 
