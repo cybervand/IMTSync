@@ -1,0 +1,9 @@
+- [Project overview](project_overview.md) — what IMT-MP is, why it exists, the underlying motivation
+- [Build & deploy](build_and_deploy.md) — single command, dual-install auto-deploy
+- [Runtime gotchas](runtime_gotchas.md) — Mono 2.x APIs that compile but throw at runtime
+- [Two-PC testing setup](testing_setup.md) — host vs client install paths, in-game overlay hotkey
+- [IMT internals notes](imt_internals.md) — verified type signatures, where Cecil-research findings live
+- [CSM API notes](csm_api_notes.md) — Connection contract, send/receive APIs, IgnoreHelper semantics
+- [Cecil inspection pattern](cecil_pattern.md) — copy/paste-able PowerShell harness for IMT/CSM DLL inspection
+- [User collaboration preferences](user_preferences.md) — narration style, testing cadence, decision style
+- [BG agents blocked in sandbox](agents_blocked_in_sandbox.md) — don't delegate shell-requiring work
