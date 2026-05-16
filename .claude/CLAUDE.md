@@ -34,12 +34,17 @@ M:\git\IMT-MP\              the .git directory
 ├── Handlers\
 │   └── IMTActionHandler.cs CommandHandler<IMTActionCommand>; routes by Type
 ├── Services\
-│   ├── Log.cs              file logger (Cities_Data\Logs\CSM.IMTSync.log) + ring buffer
-│   ├── LogOverlay.cs       in-game OnGUI overlay, toggle Ctrl+Shift+L
-│   ├── CsmBridge.cs        Command.SendToAll wrapper + IDisposable IgnoreScope
-│   ├── PointResolver.cs    PointRef → IEntrancePointData (API) or MarkingEnterPoint (internal)
-│   └── StyleSerializer.cs  IMT Style ↔ XML round-trip (Mono-2.x-safe parser)
-└── docs\                   (Phase 3+ design docs land here)
+│   ├── Log.cs                     file logger (Cities_Data\Logs\CSM.IMTSync.log) + ring buffer
+│   ├── LogOverlay.cs              in-game OnGUI overlay, toggle Ctrl+Shift+L
+│   ├── CsmBridge.cs               Command.SendToAll wrapper + IDisposable IgnoreScope
+│   ├── PointResolver.cs           PointRef → IEntrancePointData (API) or MarkingEnterPoint (internal)
+│   ├── StyleSerializer.cs         IMT Style ↔ XML round-trip (Mono-2.x-safe parser)
+│   ├── FillerVertexConverter.cs   IFillerVertex ↔ FillerVertexRef[] (Enter/LineEnd/Intersect)
+│   ├── EditClock.cs               Tier-2 LWW versioning + tombstones + Lamport clock
+│   └── PresenceStore.cs           Tier-1 per-sender claim dict, world-pos lookup via NetManager
+└── docs\
+    ├── TODO.md                    unsynced-action backlog with source-confirmed patch targets
+    └── IMT-INTERNALS.md           consolidated IMT architecture reference (6-agent survey)
 ```
 
 ## Build & deploy
@@ -147,31 +152,90 @@ Read it for the phase ordering, design rationale, and known risks.
 | `63e61e4` | Phase 0+1 | Repo scaffold, Marking.Clear sync — networking proven on two PCs (84ms latency) |
 | `0ffbca7` | Phase 2.2 | AddRegularLine sync — proved style XML round-trip + point resolution end-to-end |
 | `5696976` | Phase 2.4+2.5 | Full Add/Remove surface (NormalLine, StopLine, LaneLine, CrosswalkLine, Filler), ResetOffsets, in-game log overlay |
+| `cf6def5` | .claude scaffold | `.claude/CLAUDE.md` + `.claude/memory/` for next session |
 
-## What's pending (in priority order)
+## What's pending
 
-1. **In-game test of Phase 2.4+2.5** (Filler, Stop, Crosswalk, Delete, Reset) — built clean but not all exercised yet
-2. **Style-edit sync** — change a line's color/width/dash propagates. Likely patch target:
-   `Marking.Update(MarkingLine, bool, bool)` postfix (need to filter the per-frame render-driven
-   calls vs user-edit calls). Could also patch `IRegularLineData.AddRule` if rules need syncing.
-3. **SetPointOffset** — patch `MarkingEnterPoint.Offset` setter (or `DragPointToolMode.OnMouseUp`
-   for the commit case). Avoid patching `BasePropertyValue<float>.set_Value` directly — too broad.
-4. **Phase 3: Presence + Live preview** — show other players' tool mode + selection ghost +
-   rubber-band line + live drag preview. Substantial new infrastructure (throttle, ghost renderer).
-5. **Phase 4: Paste/Preset whole-marking sync** — `ApplyMarkingXmlCommand` for `PasteMarkingToolMode`
-   and `ApplyPresetToolMode`. Receiver calls `Marking.FromXml(version, xml, new ObjectsMap(), true)`.
-6. **Mid-session join snapshot** — `Connection.OnClientConnect(Player)` hook to ship the host's
-   `MarkingManager.ToXml()` to the joining client.
+The full unsynced-action backlog lives in [`docs/TODO.md`](../docs/TODO.md) — now source-confirmed
+exact patch targets from the 6-agent IMT survey. The consolidated IMT architecture reference is
+[`docs/IMT-INTERNALS.md`](../docs/IMT-INTERNALS.md).
+
+Top-of-list:
+
+1. **Line style change (multi-rule lines)** — current `MarkingLineRawRule.StyleChanged` patch only
+   applies to `Rules[0]`. Wire format needs a rule index/edge identity.
+2. **Point split toggle** — `PointsEditor.SplitChanged(bool)` (private). Drop-in.
+3. **Crosswalk borders + CutLines** — `CrosswalksEditor.RightBorgerChanged/LeftBorgerChanged/CutLines()`
+   (typos intentional upstream).
+4. **Full Crosswalk add/remove** — `Marking.AddCrosswalk(MarkingCrosswalk)` (the wide painted shape,
+   not just `AddCrosswalkLine`).
+5. **Bulk style applies** — `*.PasteStyle()/ResetStyle()/ApplyStyleSameStyle()/ApplyStyleSameType()`
+   across Filler/Crosswalks/RulePanel editors.
+6. **Phase 4 — Paste / Preset / Template** — patch `IntersectionTemplateEditor.Apply/ApplyAll/Link`
+   or the Tool-layer equivalents; wire format = copy `MoveItIntegration` shape exactly
+   (`Marking.ToXml() ↔ FromXml(Version, XElement, ObjectsMap)`).
+7. **Phase 3 — Live drag previews** — patch `MakeLineToolMode.OnToolUpdate`,
+   `MakeFillerToolMode.OnPrimaryMouseClicked`, `DragPointToolMode.OnMouseDrag` (throttled 10 Hz).
+8. **Mid-session join snapshot** — design is now precise: iterate
+   `SingletonManager<NodeMarkingManager>.Instance` (it's `IEnumerable`), `ToXml()` each, broadcast.
+   Receiver applies via `FromXml(Version, xml, new ObjectsMap(), needUpdate:true)` —
+   `VersionMigration` auto-handles cross-version.
+
+## Working-tree (uncommitted) progress
+
+The DLL deployed to both game installs is significantly ahead of the last commit. This session
+landed (built clean, partially in-game-verified):
+
+| Feature | Wire | Patches | Notes |
+| --- | --- | --- | --- |
+| **SetPointOffset** | `[ProtoMember(10)] float Offset` | `DragPointToolMode.OnMouseUp` + `PointsEditor.OffsetChanged` | Built clean, in-game test pending |
+| **Filler v2** | `[ProtoMember(11)] FillerVertexRef[] Vertices` + new `FillerVertexRef` struct | `Marking_AddFiller_Patch` rewritten to use `FillerVertexConverter` polymorphic vertex extraction (Enter / LineEnd / Intersect) | Receiver-side LineEnd uses `marking.TryGetLine(MarkingPointPair, out)` |
+| **Style edit sync** | New action types `UpdateLineStyle=40`, `UpdateFillerStyle=41`, `UpdateCrosswalkStyle=42`; reuses `StyleXml` field | `MarkingFiller.StyleChanged` + `MarkingCrosswalk.StyleChanged` + `MarkingLineRawRule.StyleChanged` (all private, string-name HarmonyPatch) | First rule only on lines; multi-rule deferred |
+| **Tier 2 LWW versioning** | `[ProtoMember(12)] ulong Version`; new `Services/EditClock.cs` with element-string→stamp dict, Lamport bump on receive, tombstones, marking purge on Clear | Auto-stamp on `CsmBridge.SendToAll(IMTActionCommand)`; gate at top of `Handle()` | Concurrent edits converge LWW |
+| **Tier 1 — SelectIntersection (chat)** | `SelectIntersection=50` + `[ProtoMember(13)] string ClaimantName` | `IntersectionMarkingTool.SetMarking(Marking)` postfix | Prints to CSM chat via `Chat.Instance.PrintGameMessage(...)` |
+| **Tier 1 — visual ring + entrance dots** | (no new wire fields) | Render postfix on `IntersectionMarkingTool.RenderOverlay(CameraInfo)` | Force-loads marking via `GetOrCreateMarking` so entrance dots render even if local user hasn't visited |
+| **Tier β — CursorPresence** | `CursorPresence=60` + `[ProtoMember(14..16)] float CursorX/Y/Z` | Same `RenderOverlay` postfix, throttled 10 Hz + 10 cm threshold | Routes to `ToolSimulatorCursorManager.GetCursorView(senderId)` + `pcm.SetCursor(null)` + `SetLabelContent(name, pos)` — native CSM cursor rendering |
+| **PresenceStore + EditClock** | (services) | n/a | `Services/PresenceStore.cs` (per-sender claim dict, player-color palette, NetManager world-pos lookup); `Services/EditClock.cs` |
+| **csproj reference** | n/a | n/a | Added `CSM.BaseGame.dll` reference (needed for ToolSimulatorCursorManager) |
+
+## Known bugs / mitigations
+
+- **Bug 2 (open):** Fillers anchored to **pre-existing** lines from prior sessions fail on the
+  receiver — the host's saved-state lines aren't in the client's marking. **Workaround:** type
+  `/sync` on the client to pull host's full savegame. **Proper fix:** mid-session state push
+  (item 8 in pending list above).
 
 ## Operational gotchas worth remembering
 
-- **Background agents in this user's environment can't run shell.** Don't delegate Cecil
-  research or `dotnet build` to BG agents — they'll stall asking for permission. Do shell-
-  requiring work in foreground or send the agent the pre-extracted info.
+- **Background agents can do WebFetch / Read / Grep / Glob but NOT shell.** The earlier rule
+  "BG agents can't do anything" was too broad. We successfully ran 6 parallel agents that
+  WebFetched GitHub raw files and returned structured surveys (see [docs/IMT-INTERNALS.md](../docs/IMT-INTERNALS.md)).
+  Agents CAN do source-level investigation via GitHub raw URLs, code analysis, file reviews.
+  Agents CAN'T run PowerShell/Bash/dotnet — Cecil inspection and builds must stay in foreground.
+- **Folder ≠ namespace in IMT source.** The `IMT.Manager.*` namespace types Cecil shows are
+  actually under `IMT/MarkingItems/` in the GitHub repo. `IMT/Manager/` folder is just
+  orchestration (managers, save extensions). See [docs/IMT-INTERNALS.md](../docs/IMT-INTERNALS.md).
+- **IMT has NO public events.** Both DLL and source confirmed: zero `event`, zero `Action`/`Func`
+  fields in the public API, no `Subscribe`/`Register` methods. Harmony patches are the only
+  send-side mechanism, forever.
+- **`Style.OnStyleChanged` is the universal mutation tap.** Patching the owner's private
+  `StyleChanged()` method (MarkingFiller / MarkingCrosswalk / MarkingLineRawRule) catches every
+  property edit across all 42 style classes via the Action delegate the owner wired in its ctor.
+- **Upstream typos preserved on disk** — match exactly when patching by string name:
+  `PointLocation.Rigth`, `EntranceDataEnterfaces.cs`, `CrosswalksEditor.*BorgerChanged`,
+  `IMT/Tools/MakeItem/MakeLIne.cs`.
 - **Each new mod release of IMT may rename internal types.** When IMT updates, re-Cecil-check
-  signatures before assuming patches still apply.
-- **CSM updates** can change CSM.API. The `Connection` contract has been stable but watch
-  release notes.
+  signatures before assuming patches still apply. Or switch to `IMT.API.*` interfaces for the
+  receive side (more stable — see [docs/IMT-INTERNALS.md](../docs/IMT-INTERNALS.md) "high-value API methods" table).
+- **CSM has cursor sync we can leverage.** `CSM.BaseGame.Injections.Tools.ToolSimulatorCursorManager`
+  is a public singleton with `GetCursorView(senderId)` → `PlayerCursorManager`. Call
+  `pcm.SetCursor(null)` (falls back to DefaultTool cursor) + `pcm.SetLabelContent(name, pos)` and
+  CSM's PCM.Update renders the cursor sprite + name label per frame — exactly like for vanilla tools.
+- **CSM updates** can change CSM.API. The `Connection` contract is stable but `CSM.BaseGame`
+  (where the cursor and tool simulators live) is internal and may shift between releases.
+- **CSM `Connection` only exposes `RegisterHandlers` / `UnregisterHandlers` as virtual** — no
+  `OnClientConnect(Player)` hook on the public API (despite older notes suggesting otherwise).
+  Mid-session state push must piggyback on the first `RegisterHandlers` after a connection event.
 
 ## Two-CS-install layout (this user's specific setup)
 

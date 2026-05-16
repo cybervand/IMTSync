@@ -5,10 +5,12 @@ metadata:
   type: reference
 ---
 
+# Two-PC testing setup
+
 **Two-CS-install layout** (the user runs both on the same physical machine, two separate CS installs to test multiplayer locally without needing a second machine):
 
 | | Host | Client |
-|---|---|---|
+| --- | --- | --- |
 | CS install | `M:\Games\Cities Skylines\` | `M:\Games\C_S2\Cities Skylines\` |
 | Mod folder | `Files\Mods\` | `Files\Mods\` |
 | Log folder | `Cities_Data\Logs\` | `Cities_Data\Logs\` |

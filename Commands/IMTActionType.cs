@@ -26,6 +26,15 @@ namespace CSM.IMTSync.Commands
 
         ResetOffsets = 30,
         SetPointOffset = 31,
+
+        // Phase 2.6 - style edits (color / width / dash / pattern / etc.)
+        UpdateLineStyle = 40,      // identifies the line via A+B; first rule only (v1)
+        UpdateFillerStyle = 41,    // identifies the filler via Vertices fingerprint
+        UpdateCrosswalkStyle = 42, // identifies the crosswalk via A+B (its CrosswalkLine endpoints)
+
+        // Tier 1 (presence) - transient signals, not versioned by EditClock
+        SelectIntersection = 50,   // user picked an intersection; MarkingId=0 means "deselected"
+        CursorPresence = 60,       // local cursor world position; throttled at 10 Hz from sender
     }
 
     /// <summary>

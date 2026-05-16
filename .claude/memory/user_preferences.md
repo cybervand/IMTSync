@@ -5,6 +5,8 @@ metadata:
   type: feedback
 ---
 
+# User collaboration preferences
+
 **Narration style:** "give me a 1 sentence of what you are doing" before each action when running multiple tool calls. The user explicitly preferred Option 2 from the visibility-vs-speed prompt: silent work with one-sentence preface per step, brief milestone summaries.
 
 **Why:** When PowerShell commands fly by without context, the user can't tell what's happening or whether to redirect. Single-sentence narration lets them stay engaged without slowing things down.

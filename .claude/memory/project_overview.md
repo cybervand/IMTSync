@@ -5,6 +5,8 @@ metadata:
   type: project
 ---
 
+# Project overview
+
 IMT-MP is a CSM (Cities Skylines Multiplayer, workshop ID `1558438291`) sync extension for the
 Intersection Marking Tool mod (IMT, workshop ID `2140418403`). It broadcasts IMT user-actions
 across all clients in a multiplayer session so road markings stay in sync. Without it, IMT

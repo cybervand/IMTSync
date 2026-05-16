@@ -56,6 +56,10 @@
       <HintPath>$(CSWorkshopPath)\1558438291\CSM.API.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="CSM.BaseGame">
+      <HintPath>$(CSWorkshopPath)\1558438291\CSM.BaseGame.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="protobuf-net">
       <HintPath>$(CSWorkshopPath)\1558438291\protobuf-net.dll</HintPath>
       <Private>false</Private>

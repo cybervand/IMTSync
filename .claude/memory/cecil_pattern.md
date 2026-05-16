@@ -5,6 +5,8 @@ metadata:
   type: reference
 ---
 
+# Cecil inspection pattern
+
 **Why Cecil instead of `Reflection.Assembly.LoadFrom`:** the .NET reflection LoadFrom path
 needs to resolve all assembly dependencies (UnityEngine, ColossalManaged, etc.). It also fails
 on Windows-1252-encoded blocked files from network paths (HRESULT 0x80131515). Cecil reads

@@ -5,6 +5,8 @@ metadata:
   type: feedback
 ---
 
+# Runtime gotchas — Mono 2.x / .NET 3.5
+
 **Rule:** APIs that the compile-time reference assemblies define but the actual Mono 2.x runtime
 does NOT have will throw `MissingMethodException` (or similar) at runtime. The compiler does NOT
 warn you. Always verify NEW System.Xml.Linq / System.Net.Http / 4.0+ API calls before committing.
@@ -18,7 +20,7 @@ is a .NET 4.0 API.
 **How to apply:** When tempted to use any of the below, use the workaround instead:
 
 | Forbidden API | Workaround |
-|---|---|
+| --- | --- |
 | `XElement.Parse(string)` | `XElement.Load(XmlReader.Create(new StringReader(xml), new XmlReaderSettings()))` — see `Services\StyleSerializer.cs` |
 | `Path.Combine(a, b, c)` 3-arg | nest 2-arg: `Path.Combine(Path.Combine(a, b), c)` |
 | `String.IsNullOrWhiteSpace` | `String.IsNullOrEmpty` and trim manually if needed |

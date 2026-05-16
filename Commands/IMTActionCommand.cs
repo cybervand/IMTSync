@@ -38,5 +38,30 @@ namespace CSM.IMTSync.Commands
         // contours made of EnterFillerVertex (the common user-click case); each entry pairs with
         // the same-index PointRef in Contour.
         [ProtoMember(9)] public byte[] ContourAlignments;
+
+        // For SetPointOffset: the new Offset value (meters along the road's incoming edge).
+        // Point identity uses field A.
+        [ProtoMember(10)] public float Offset;
+
+        // For AddFiller/RemoveFiller v2: richer contour supporting all IFillerVertex subclasses
+        // (Enter / LineEnd / Intersect). When this is populated, the legacy Contour /
+        // ContourAlignments fields at tags 6/9 are ignored on the receiver.
+        [ProtoMember(11)] public FillerVertexRef[] Vertices;
+
+        // Tier-2 LWW version stamp. Lamport-clock-style ulong assigned by the sender.
+        // Receiver uses EditClock.ShouldApply(elementId, Version) to gate dispatch and rejects
+        // stale edits. Zero is the default; ClearMarking / ResetOffsets are unversioned (always
+        // applied), other action types are gated.
+        [ProtoMember(12)] public ulong Version;
+
+        // Display name of the player who emitted the action - used by SelectIntersection
+        // (presence chat notification). Pulled from CSM.API.Chat.GetCurrentUsername() at send.
+        [ProtoMember(13)] public string ClaimantName;
+
+        // CursorPresence: local cursor world position. Throttled at 10 Hz on send. On receive,
+        // routed to CSM's ToolSimulatorCursorManager.GetCursorView(senderId).SetLabelContent(...).
+        [ProtoMember(14)] public float CursorX;
+        [ProtoMember(15)] public float CursorY;
+        [ProtoMember(16)] public float CursorZ;
     }
 }

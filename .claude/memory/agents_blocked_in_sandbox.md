@@ -1,19 +1,39 @@
 ---
 name: agents-blocked-in-sandbox
-description: Background subagents in this user's harness are sandboxed to read-only - cannot run PowerShell, Bash, or dotnet build. Don't delegate shell-requiring work to them.
+description: Background subagents can't run shell (PowerShell/Bash/dotnet) but CAN use WebFetch/Read/Grep/Glob. Use them for source-level surveys via GitHub raw URLs; keep Cecil and builds in foreground.
 metadata:
   type: feedback
 ---
 
-**Rule:** Background agents (Plan agent AND general-purpose agent) launched in this user's environment **cannot execute shell commands**. Any task requiring `dotnet build`, PowerShell, Bash, Cecil reflection, or other shell-mediated work must be done in foreground.
+# Agents in sandbox — what works, what doesn't
 
-**Why:** Both BG agents we spawned in the parallel-work attempt failed identically — they reported "I cannot run PowerShell or Bash commands in this READ-ONLY mode (sandboxed)." The Plan agent additionally couldn't write files. Each consumed 40-90k tokens producing only "I'm blocked, what should I do?" responses.
+**Refined rule (2026-05-16):** The earlier "BG agents can't do anything" framing was too broad.
+Background agents in this user's harness:
+
+- **CAN do:** `WebFetch`, `Read`, `Grep`, `Glob`. They WORK for source-level research via GitHub
+  raw URLs, file analysis, code reviews, structured cataloging from web-fetched docs.
+- **CAN'T do:** shell commands. No `dotnet build`, no PowerShell, no Bash, no Cecil DLL inspection.
+  Worktree isolation also unavailable (harness CWD is outside the repo).
+
+**Proof of CAN-DO:** A 6-agent parallel survey of [MacSergey/NodeMarkup](https://github.com/MacSergey/NodeMarkup) on 2026-05-16 ran to completion in ~3-5 minutes each, returning structured catalogs covering IMT.API, IMT/Manager, IMT/MarkingItems, IMT/Tools, IMT/UI, and IMT/Utilities+root. Synthesis written to `docs/IMT-INTERNALS.md`.
+
+**Why the original error happened:** An earlier attempt asked agents to "verify the build" or run Cecil — both required shell. The agents reported sandbox blockage and consumed 40-90k tokens producing only "I'm blocked" responses. The fix is **task scoping**, not avoiding agents.
 
 **How to apply:**
-- For research that needs Cecil DLL inspection, build verification, or any shell call → do it in foreground.
-- BG agents are still useful for **pure file-writing work** where all inputs are pre-extracted and given to them in the prompt (e.g., "write these 5 files with this exact content"). But they can't verify the build, so always rebuild yourself after merging their output.
-- Better plan-mode pattern: I do shell-requiring research in foreground first → produce a self-contained "implementation packet" with Cecil-verified signatures → THEN delegate the file writing to a BG agent.
 
-**Worktree isolation also blocked:** `Agent` tool with `isolation: "worktree"` requires the harness CWD to be inside a git repo. The harness in this user's env starts in the CS assets folder (`c:\Users\Brewing Storm Lite\AppData\Local\...\255710`), NOT in `M:\develop\IMT-MP`. So worktree isolation cannot be used. Without it, parallel BG agents writing to overlapping files would conflict — must use file isolation (each agent writes to NEW files only).
+- For Cecil DLL inspection, `dotnet build`, or any shell call → **do in foreground**.
+- For source-level investigation from GitHub raw files, structured cataloging, code analysis → **delegate to parallel BG agents**. Self-contained scope, clear output format, ~400-600 line output cap per agent.
+- For pure file-writing where inputs are pre-extracted (e.g., "write these 5 files with this exact content") → BG agent works.
+- Always rebuild yourself in foreground after merging BG agent output — they can't verify the build.
 
-**Practical tactic:** for medium tasks, sequential foreground is faster than parallel + merge-coordination + verify. Parallel BG agents are only worth the overhead if the agent task is truly self-contained AND large.
+**Worktree isolation:** still blocked. `Agent` tool with `isolation: "worktree"` requires the harness CWD to be inside a git repo. The harness starts in `c:\Users\Brewing Storm Lite\AppData\Local\...\255710` (CS assets folder), NOT `M:\develop\IMT-MP`. Workaround: have each parallel agent write to NEW files only (no overlap).
+
+**Briefing pattern that works (from 2026-05-16 survey):**
+
+- Include project context (what IMT-MP is, why we're surveying)
+- Include what we've already mapped (so agents don't duplicate)
+- Give a specific folder/URL scope
+- Specify desired output format (structured catalog with sections)
+- Cap output length (~400-600 lines)
+- Tell them not to spawn sub-agents
+- Tell them to be honest about uncertainty

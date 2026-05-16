@@ -1,6 +1,7 @@
 using System;
 using CSM.API.Commands;
 using CSM.API.Helpers;
+using CSM.IMTSync.Commands;
 
 namespace CSM.IMTSync.Services
 {
@@ -15,6 +16,23 @@ namespace CSM.IMTSync.Services
     /// </summary>
     internal static class CsmBridge
     {
+        /// <summary>
+        /// Send an IMT action with automatic version stamping for LWW convergence. Computes the
+        /// element ID, assigns cmd.Version from EditClock if the action is versioned, sends, then
+        /// records locally so an incoming stale edit can't overwrite our own action.
+        /// </summary>
+        public static void SendToAll(IMTActionCommand cmd)
+        {
+            if (cmd == null) return;
+            var elementId = EditClock.ElementIdFor(cmd);
+            if (elementId != null) cmd.Version = EditClock.NextVersion();
+
+            SendToAll((CommandBase)cmd);
+
+            if (elementId != null)
+                EditClock.Record(elementId, cmd.Version, EditClock.IsRemoveAction(cmd.Type));
+        }
+
         public static void SendToAll(CommandBase cmd)
         {
             if (cmd == null) return;
