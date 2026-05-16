@@ -161,8 +161,8 @@ namespace CSM.IMTSync.Services
 
         private static string PairKey(PointRef a, PointRef b)
         {
-            var ka = a.EntranceId + ":" + a.Index;
-            var kb = b.EntranceId + ":" + b.Index;
+            var ka = a.Kind + ":" + a.EntranceId + ":" + a.Index;
+            var kb = b.Kind + ":" + b.EntranceId + ":" + b.Index;
             return System.StringComparer.Ordinal.Compare(ka, kb) <= 0 ? (ka + "/" + kb) : (kb + "/" + ka);
         }
     }

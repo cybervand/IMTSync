@@ -7,12 +7,18 @@ metadata:
 
 # Cecil inspection pattern
 
+> **First check `M:\develop\IMT-MP\NodeMarkup-master\NodeMarkup-master\`** for source-level
+> answers (Read/Grep instantly). Use Cecil only when you need bytecode-level info that source
+> can't give (e.g., compiler-generated helper names, exact IL traces, ambiguous overload
+> resolution as the JIT sees it).
+
 **Why Cecil instead of `Reflection.Assembly.LoadFrom`:** the .NET reflection LoadFrom path
 needs to resolve all assembly dependencies (UnityEngine, ColossalManaged, etc.). It also fails
 on Windows-1252-encoded blocked files from network paths (HRESULT 0x80131515). Cecil reads
 metadata directly without resolving deps — much more reliable.
 
 **One-time setup:**
+
 ```powershell
 $tmp = "$env:TEMP\imt-sync-analysis"
 if (-not (Test-Path $tmp)) { New-Item -ItemType Directory $tmp | Out-Null }
@@ -24,6 +30,7 @@ Add-Type -Path "$tmp\Mono.Cecil.dll"
 ```
 
 **Inspecting IMT:**
+
 ```powershell
 $module = [Mono.Cecil.ModuleDefinition]::ReadModule("M:\Games\Cities Skylines\Files\Mods\2140418403\IntersectionMarkingTool.dll")
 # or for the API stub:
@@ -31,6 +38,7 @@ $apiModule = [Mono.Cecil.ModuleDefinition]::ReadModule("M:\Games\Cities Skylines
 ```
 
 **Inspecting CSM:**
+
 ```powershell
 $csmApi = [Mono.Cecil.ModuleDefinition]::ReadModule("D:\SteamLibrary\steamapps\workshop\content\255710\1558438291\CSM.API.dll")
 $csm    = [Mono.Cecil.ModuleDefinition]::ReadModule("D:\SteamLibrary\steamapps\workshop\content\255710\1558438291\CSM.dll")
@@ -38,6 +46,7 @@ $csm    = [Mono.Cecil.ModuleDefinition]::ReadModule("D:\SteamLibrary\steamapps\w
 ```
 
 **Inspecting other extensions for patterns:**
+
 ```powershell
 # MoveItSync - cleanest reference; closest analogue to what we're building
 $moveItSync = [Mono.Cecil.ModuleDefinition]::ReadModule("M:\Games\Cities Skylines\Files\Mods\3693412367\CSM.MoveItSync.dll")
@@ -46,6 +55,7 @@ $moveItSync = [Mono.Cecil.ModuleDefinition]::ReadModule("M:\Games\Cities Skyline
 ```
 
 **Common queries:**
+
 ```powershell
 # All public methods of a type
 $t = $module.Types | Where-Object { $_.Name -eq 'Marking' } | Select-Object -First 1
@@ -79,6 +89,7 @@ $module.Types | Where-Object {
 ```
 
 **Cecil quirks worth knowing:**
+
 - `t.Interfaces` shows ONLY directly-declared interfaces, not inherited. To see inherited ones,
   walk the BaseType chain.
 - `param.ParameterType.IsByReference` and `param.IsOut` distinguish `ref` vs `out` (Cecil shows

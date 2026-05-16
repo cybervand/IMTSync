@@ -25,25 +25,41 @@ namespace CSM.IMTSync.Services
             catch (Exception ex) { Log.Error("StyleSerializer.ToXml threw: " + ex); return null; }
         }
 
-        public static bool TryFromXml<T>(string xml, out T style) where T : Style
+        /// <summary>
+        /// Mono-2.x-safe XElement loader. XElement.Parse(string) is BROKEN in CS's Mono
+        /// runtime because it sets XmlReaderSettings.MaxCharactersFromEntities — a .NET 4.0+
+        /// API that doesn't exist on the actual runtime. This wraps StringReader + XmlReader
+        /// + XElement.Load. Returns null on failure.
+        /// </summary>
+        public static XElement LoadXml(string xml)
         {
-            style = null;
-            if (string.IsNullOrEmpty(xml)) return false;
+            if (string.IsNullOrEmpty(xml)) return null;
             try
             {
-                // XElement.Parse(string) is BROKEN in CS's Mono 2.x runtime — it tries to set
-                // XmlReaderSettings.MaxCharactersFromEntities (a .NET 4.0+ API that doesn't exist
-                // on the actual runtime). Workaround: build the XmlReader ourselves with only
-                // the settings Mono 2.x supports, then XElement.Load(reader).
-                XElement elem;
                 var settings = new XmlReaderSettings();  // no MaxCharactersFromEntities
                 using (var sr = new StringReader(xml))
                 using (var reader = XmlReader.Create(sr, settings))
-                {
-                    elem = XElement.Load(reader);
-                }
+                    return XElement.Load(reader);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("StyleSerializer.LoadXml threw: " + ex);
+                return null;
+            }
+        }
+
+        public static bool TryFromXml<T>(string xml, out T style) where T : Style
+        {
+            style = null;
+            var elem = LoadXml(xml);
+            if (elem == null) return false;
+            try
+            {
                 var map = new ObjectsMap(false, false);
-                return Style.FromXml<T>(elem, map, false, false, out style);
+                if (!Style.FromXml<T>(elem, map, false, false, out style))
+                    return false;
+                StyleDiagnostics.RepairPrefabRefs(style);
+                return true;
             }
             catch (Exception ex)
             {

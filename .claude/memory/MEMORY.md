@@ -1,3 +1,5 @@
+# MEMORY index
+
 - [Project overview](project_overview.md) — what IMT-MP is, why it exists, the underlying motivation
 - [Build & deploy](build_and_deploy.md) — single command, dual-install auto-deploy
 - [Runtime gotchas](runtime_gotchas.md) — Mono 2.x APIs that compile but throw at runtime
@@ -7,6 +9,7 @@
 - [Cecil inspection pattern](cecil_pattern.md) — copy/paste-able PowerShell harness for IMT/CSM DLL inspection
 - [User collaboration preferences](user_preferences.md) — narration style, testing cadence, decision style
 - [Agents in sandbox — what works, what doesn't](agents_blocked_in_sandbox.md) — shell blocked, WebFetch/Read/Grep works
+- [Verify after every edit](verify_after_edit.md) — run lint/compile and self-fix before reporting done
 
 External docs (in repo, not in memory):
 

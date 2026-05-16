@@ -12,7 +12,7 @@ Same architectural pattern as the existing `CSM.MoveItSync`, `CSM.TmpeSync`, and
 
 ## Repo layout
 
-```
+```text
 M:\develop\IMT-MP\          working tree (git --separate-git-dir setup)
 M:\git\IMT-MP\              the .git directory
 ├── CSM.IMTSync.csproj      net35 SDK-style project, dual-deploy post-build
@@ -55,6 +55,7 @@ dotnet build CSM.IMTSync.csproj -c Release
 ```
 
 Post-build automatically copies `bin\Release\CSM.IMTSync.dll` to **both** local CS installs:
+
 - `M:\Games\Cities Skylines\Files\Mods\IMTSync\` (host install)
 - `M:\Games\C_S2\Cities Skylines\Files\Mods\IMTSync\` (client install for two-PC tests)
 
@@ -68,7 +69,7 @@ runtime does NOT have. Code compiles but throws `MissingMethodException` at runt
 **Already-discovered traps (do NOT use):**
 
 | Forbidden API | Workaround |
-|---|---|
+| --- | --- |
 | `XElement.Parse(string)` | `XElement.Load(XmlReader.Create(new StringReader(xml), new XmlReaderSettings()))` — see `Services\StyleSerializer.cs` |
 | `Path.Combine(a, b, c)` 3-arg | nest 2-arg calls: `Path.Combine(Path.Combine(a, b), c)` |
 | `String.IsNullOrWhiteSpace` | `String.IsNullOrEmpty` (manually trim if needed) |
@@ -123,6 +124,24 @@ $module = [Mono.Cecil.ModuleDefinition]::ReadModule("M:\Games\Cities Skylines\Fi
 The IMT mod folder is `Files\Mods\2140418403\` (offline copy) and
 `D:\SteamLibrary\steamapps\workshop\content\255710\2140418403\` (Steam workshop). Same DLL.
 
+## IMT source code — local mirror
+
+A copy of [MacSergey/NodeMarkup](https://github.com/MacSergey/NodeMarkup) lives at:
+
+```text
+M:\develop\IMT-MP\NodeMarkup-master\NodeMarkup-master\
+├── IMT\              the main mod source (Manager/, MarkingItems/, Tools/, UI/, Utilities/)
+├── IMT.API\          public API source (Interfaces/, Helper.cs, Enums.cs, Exceptions.cs)
+├── ModsCommon\       MacSergey's shared framework (PropertyValue, BaseTool, OverlayData, etc.)
+└── IntersectionMarkingTool.sln
+```
+
+**Gitignored** — don't commit. **Prefer Read/Grep on this over WebFetch** when investigating
+IMT internals. The repo is current as of MacSergey's latest master.
+
+See [docs/IMT-INTERNALS.md](../docs/IMT-INTERNALS.md) for the consolidated catalog from the
+6-agent survey of this codebase.
+
 ## Testing protocol
 
 1. Build (`dotnet build` — auto-deploys to both installs)
@@ -134,6 +153,7 @@ The IMT mod folder is `Files\Mods\2140418403\` (offline copy) and
 7. Check visual change appears on remote
 
 Logs at:
+
 - `M:\Games\Cities Skylines\Cities_Data\Logs\CSM.IMTSync.log` (host)
 - `M:\Games\C_S2\Cities Skylines\Cities_Data\Logs\CSM.IMTSync.log` (client)
 
@@ -148,7 +168,7 @@ Read it for the phase ordering, design rationale, and known risks.
 ## Phase status (commits)
 
 | Commit | Phase | What landed |
-|---|---|---|
+| --- | --- | --- |
 | `63e61e4` | Phase 0+1 | Repo scaffold, Marking.Clear sync — networking proven on two PCs (84ms latency) |
 | `0ffbca7` | Phase 2.2 | AddRegularLine sync — proved style XML round-trip + point resolution end-to-end |
 | `5696976` | Phase 2.4+2.5 | Full Add/Remove surface (NormalLine, StopLine, LaneLine, CrosswalkLine, Filler), ResetOffsets, in-game log overlay |
@@ -224,7 +244,7 @@ Top-of-list:
 ## Two-CS-install layout (this user's specific setup)
 
 | | Host | Client |
-|---|---|---|
+| --- | --- | --- |
 | CS install path | `M:\Games\Cities Skylines\` | `M:\Games\C_S2\Cities Skylines\` |
 | Mods folder | `Files\Mods\` | `Files\Mods\` |
 | Log folder | `Cities_Data\Logs\` | `Cities_Data\Logs\` |

@@ -44,6 +44,7 @@ namespace CSM.IMTSync.Services
                         Kind = FillerVertexKind.LineEnd,
                         P1 = ToPointRef(anchor),
                         P2 = ToPointRef(otherEnd),
+                        Align = (byte)line.Alignment,
                     });
                 }
                 else if (v is IntersectFillerVertex ifv)
@@ -84,6 +85,61 @@ namespace CSM.IMTSync.Services
 
         // ---- internals ----
 
+        public static bool TryToVertices(Marking marking, FillerVertexRef[] refs, out List<IFillerVertex> vertices)
+        {
+            vertices = null;
+            if (marking == null || refs == null) return false;
+
+            var list = new List<IFillerVertex>(refs.Length);
+            for (int i = 0; i < refs.Length; i++)
+            {
+                if (!TryToVertex(marking, refs[i], out var vertex))
+                    return false;
+                list.Add(vertex);
+            }
+
+            vertices = list;
+            return true;
+        }
+
+        public static bool TryToVertex(Marking marking, FillerVertexRef vref, out IFillerVertex vertex)
+        {
+            vertex = null;
+            switch (vref.Kind)
+            {
+                case FillerVertexKind.Enter:
+                    {
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var p)) return false;
+                        vertex = new EnterFillerVertex(p, (Alignment)vref.Align);
+                        return true;
+                    }
+                case FillerVertexKind.LineEnd:
+                    {
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var p1)) return false;
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P2, out var p2)) return false;
+                        if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
+                            line = new MarkingFillerTempLine(marking, p1, p2, (Alignment)vref.Align);
+                        var regularLine = line as MarkingRegularLine;
+                        if (regularLine == null) return false;
+                        vertex = new LineEndFillerVertex(p1, regularLine);
+                        return true;
+                    }
+                case FillerVertexKind.Intersect:
+                    {
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var a)) return false;
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P2, out var b)) return false;
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P3, out var c)) return false;
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P4, out var d)) return false;
+                        if (!marking.TryGetLine(new MarkingPointPair(a, b), out var l1) || l1 == null) return false;
+                        if (!marking.TryGetLine(new MarkingPointPair(c, d), out var l2) || l2 == null) return false;
+                        vertex = new IntersectFillerVertex(l1, l2);
+                        return true;
+                    }
+                default:
+                    return false;
+            }
+        }
+
         private static PointRef ToPointRef(MarkingPoint p)
         {
             return new PointRef
@@ -91,8 +147,24 @@ namespace CSM.IMTSync.Services
                 MarkingId  = p?.Enter?.Marking?.Id ?? 0,
                 EntranceId = p?.Enter?.Id ?? 0,
                 Index      = p?.Index ?? 0,
-                Kind       = PointKind.Entrance,
+                Kind       = PointKindOf(p),
             };
+        }
+
+        private static PointKind PointKindOf(MarkingPoint p)
+        {
+            if (p == null) return PointKind.Entrance;
+            switch (p.Type)
+            {
+                case MarkingPoint.PointType.Normal:
+                    return PointKind.Normal;
+                case MarkingPoint.PointType.Crosswalk:
+                    return PointKind.Crosswalk;
+                case MarkingPoint.PointType.Lane:
+                    return PointKind.Lane;
+                default:
+                    return PointKind.Entrance;
+            }
         }
 
         private static bool SameId(MarkingPoint a, MarkingPoint b)

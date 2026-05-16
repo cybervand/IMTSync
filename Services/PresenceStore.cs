@@ -25,7 +25,25 @@ namespace CSM.IMTSync.Services
             public Marking Marking; // resolved on receive so the render hot-path doesn't relookup
         }
 
+        public struct Preview
+        {
+            public MarkingScope Scope;
+            public ushort MarkingId;
+            public string Name;
+            public Color Color;
+            public Marking Marking;
+            public ToolPreviewKind Kind;
+            public PointRef A;
+            public PointRef B;
+            public bool HasB;
+            public Vector3 CursorPosition;
+            public FillerVertexRef[] Vertices;
+            public bool HasHoverVertex;
+            public FillerVertexRef HoverVertex;
+        }
+
         private static readonly Dictionary<int, Claim> _claims = new Dictionary<int, Claim>();
+        private static readonly Dictionary<int, Preview> _previews = new Dictionary<int, Preview>();
         private static readonly object _lock = new object();
 
         // Stable, distinguishable palette indexed by senderId. Keeps each player's color
@@ -49,6 +67,7 @@ namespace CSM.IMTSync.Services
                 if (markingId == 0)
                 {
                     _claims.Remove(senderId);
+                    _previews.Remove(senderId);
                     return;
                 }
                 _claims[senderId] = new Claim
@@ -56,20 +75,68 @@ namespace CSM.IMTSync.Services
                     Scope = scope,
                     MarkingId = markingId,
                     Name = name ?? "",
-                    RingColor = _palette[((senderId % _palette.Length) + _palette.Length) % _palette.Length],
+                    RingColor = ColorFor(senderId),
                     Marking = marking,
+                };
+            }
+        }
+
+        public static void UpdatePreview(int senderId, IMTActionCommand cmd, Marking marking)
+        {
+            lock (_lock)
+            {
+                if (cmd.PreviewKind == ToolPreviewKind.None || cmd.MarkingId == 0)
+                {
+                    _previews.Remove(senderId);
+                    return;
+                }
+
+                _previews[senderId] = new Preview
+                {
+                    Scope = cmd.Scope,
+                    MarkingId = cmd.MarkingId,
+                    Name = cmd.ClaimantName ?? "",
+                    Color = ColorFor(senderId),
+                    Marking = marking,
+                    Kind = cmd.PreviewKind,
+                    A = cmd.A,
+                    B = cmd.B,
+                    HasB = cmd.HasB,
+                    CursorPosition = new Vector3(cmd.CursorX, cmd.CursorY, cmd.CursorZ),
+                    Vertices = cmd.Vertices,
+                    HasHoverVertex = cmd.HasHoverVertex,
+                    HoverVertex = cmd.HoverVertex,
                 };
             }
         }
 
         public static void Clear(int senderId)
         {
-            lock (_lock) { _claims.Remove(senderId); }
+            lock (_lock)
+            {
+                _claims.Remove(senderId);
+                _previews.Remove(senderId);
+            }
         }
 
         public static List<Claim> Snapshot()
         {
             lock (_lock) { return new List<Claim>(_claims.Values); }
+        }
+
+        public static List<Preview> PreviewSnapshot()
+        {
+            lock (_lock) { return new List<Preview>(_previews.Values); }
+        }
+
+        public static int PreviewCount()
+        {
+            lock (_lock) { return _previews.Count; }
+        }
+
+        private static Color ColorFor(int senderId)
+        {
+            return _palette[((senderId % _palette.Length) + _palette.Length) % _palette.Length];
         }
 
         /// <summary>

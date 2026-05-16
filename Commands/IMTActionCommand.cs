@@ -63,5 +63,21 @@ namespace CSM.IMTSync.Commands
         [ProtoMember(14)] public float CursorX;
         [ProtoMember(15)] public float CursorY;
         [ProtoMember(16)] public float CursorZ;
+
+        // MarkingSnapshot: the host's full Marking.ToXml() chunk for one marking. Applied on
+        // receiver via Marking.FromXml(parsedImtVersion, xml, new ObjectsMap(), needUpdate:true).
+        [ProtoMember(17)] public string MarkingXml;
+        // The sender's IMT assembly version (System.Version.ToString()). Used by FromXml to
+        // decide which VersionMigration helpers to apply. Both ends typically have the same
+        // workshop subscription so migrations are usually no-ops, but ship it for safety.
+        [ProtoMember(18)] public string ImtVersion;
+
+        // ToolPreview: transient render-only state for IMT's live overlay.
+        // Reuses A/B for selected+hover point, CursorX/Y/Z for the current raycast position,
+        // Vertices for a partial filler contour, and HoverVertex for the filler candidate.
+        [ProtoMember(19)] public ToolPreviewKind PreviewKind;
+        [ProtoMember(20)] public bool HasB;
+        [ProtoMember(21)] public bool HasHoverVertex;
+        [ProtoMember(22)] public FillerVertexRef HoverVertex;
     }
 }

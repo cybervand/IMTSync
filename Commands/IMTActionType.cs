@@ -35,6 +35,22 @@ namespace CSM.IMTSync.Commands
         // Tier 1 (presence) - transient signals, not versioned by EditClock
         SelectIntersection = 50,   // user picked an intersection; MarkingId=0 means "deselected"
         CursorPresence = 60,       // local cursor world position; throttled at 10 Hz from sender
+
+        // Mid-session state push (Bug 2 fix) - new clients request state, host responds with snapshots
+        MarkingSnapshot = 70,      // full Marking.ToXml() chunk for one marking; receiver applies via FromXml
+        SnapshotRequest = 71,      // "send me the current state" - server responds with MarkingSnapshot per marking
+
+        // Transient IMT tool-mode overlay: selected point, hover point, cursor, partial filler contour.
+        ToolPreview = 80,
+    }
+
+    public enum ToolPreviewKind : byte
+    {
+        None = 0,
+        Line = 1,
+        Crosswalk = 2,
+        Filler = 3,
+        DragPoint = 4,
     }
 
     /// <summary>

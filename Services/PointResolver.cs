@@ -38,23 +38,40 @@ namespace CSM.IMTSync.Services
         public static bool TryResolveInternalEnterPoint(Marking marking, PointRef r, out MarkingEnterPoint point)
         {
             point = null;
+            if (TryResolveInternalPoint(marking, r, out var resolved) && resolved is MarkingEnterPoint enterPoint)
+            {
+                point = enterPoint;
+                return true;
+            }
+            return false;
+        }
+
+        public static bool TryResolveInternalPoint(Marking marking, PointRef r, out MarkingPoint point)
+        {
+            point = null;
             if (marking == null) return false;
-            // Marking exposes Entrances via internal types; we walk to find the matching one.
-            // Each Entrance has an Id (ushort) and a list of MarkingEnterPoints with Index (byte).
+
             foreach (var entrance in marking.Enters)
             {
                 if (entrance.Id != r.EntranceId) continue;
-                foreach (var ep in entrance.EnterPoints)
-                {
-                    if (ep != null && ep.Index == r.Index)
-                    {
-                        point = ep;
-                        return true;
-                    }
-                }
-                return false;
+                return entrance.TryGetPoint(r.Index, ToPointType(r.Kind), out point);
             }
             return false;
+        }
+
+        private static MarkingPoint.PointType ToPointType(PointKind kind)
+        {
+            switch (kind)
+            {
+                case PointKind.Normal:
+                    return MarkingPoint.PointType.Normal;
+                case PointKind.Crosswalk:
+                    return MarkingPoint.PointType.Crosswalk;
+                case PointKind.Lane:
+                    return MarkingPoint.PointType.Lane;
+                default:
+                    return MarkingPoint.PointType.Enter;
+            }
         }
     }
 }

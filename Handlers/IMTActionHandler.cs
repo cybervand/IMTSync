@@ -32,7 +32,8 @@ namespace CSM.IMTSync.Handlers
                 return;
             }
 
-            Log.Info($"RECV from sender {cmd.SenderId}: {cmd.Type} v{cmd.Version} on {cmd.Scope} {cmd.MarkingId}");
+            if (cmd.Type != IMTActionType.CursorPresence && cmd.Type != IMTActionType.ToolPreview)
+                Log.Info($"RECV from sender {cmd.SenderId}: {cmd.Type} v{cmd.Version} on {cmd.Scope} {cmd.MarkingId}");
 
             // Transient presence signals don't touch IMT state - handle before marking resolution
             // so we don't accidentally GetOrCreateMarking() for a node the remote player is just
@@ -45,6 +46,21 @@ namespace CSM.IMTSync.Handlers
             if (cmd.Type == IMTActionType.CursorPresence)
             {
                 ApplyCursorPresence(cmd);
+                return;
+            }
+            if (cmd.Type == IMTActionType.ToolPreview)
+            {
+                ApplyToolPreview(cmd);
+                return;
+            }
+            if (cmd.Type == IMTActionType.SnapshotRequest)
+            {
+                ApplySnapshotRequest(cmd);
+                return;
+            }
+            if (cmd.Type == IMTActionType.MarkingSnapshot)
+            {
+                ApplyMarkingSnapshot(cmd);
                 return;
             }
 
@@ -133,9 +149,9 @@ namespace CSM.IMTSync.Handlers
 
         private static void ApplyAddLine<TStyle>(Marking marking, IMTActionCommand cmd, AddLineCall<TStyle> add) where TStyle : Style
         {
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.A, out var startPt))
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var startPt))
             { Log.Warn($"{cmd.Type}: cannot resolve start point ({cmd.A.EntranceId}/{cmd.A.Index})"); return; }
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.B, out var endPt))
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var endPt))
             { Log.Warn($"{cmd.Type}: cannot resolve end point ({cmd.B.EntranceId}/{cmd.B.Index})"); return; }
             if (!StyleSerializer.TryFromXml<TStyle>(cmd.StyleXml, out var style))
             { Log.Warn($"{cmd.Type}: failed to parse style XML"); return; }
@@ -146,9 +162,9 @@ namespace CSM.IMTSync.Handlers
 
         private static void ApplyRemoveLine(Marking marking, IMTActionCommand cmd)
         {
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.A, out var startPt))
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var startPt))
             { Log.Info($"{cmd.Type}: cannot resolve start point - probably already gone (no-op)"); return; }
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.B, out var endPt))
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var endPt))
             { Log.Info($"{cmd.Type}: cannot resolve end point - probably already gone (no-op)"); return; }
 
             var pair = new MarkingPointPair(startPt, endPt);
@@ -224,19 +240,19 @@ namespace CSM.IMTSync.Handlers
             {
                 case FillerVertexKind.Enter:
                     {
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P1, out var p))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var p))
                         { Log.Warn($"AddFiller vert {i}: cannot resolve Enter point"); return false; }
                         v = new EnterFillerVertex(p, (Alignment)vref.Align);
                         return true;
                     }
                 case FillerVertexKind.LineEnd:
                     {
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P1, out var p1))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var p1))
                         { Log.Warn($"AddFiller vert {i}: cannot resolve LineEnd anchor"); return false; }
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P2, out var p2))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P2, out var p2))
                         { Log.Warn($"AddFiller vert {i}: cannot resolve LineEnd other-end"); return false; }
                         if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
-                        { Log.Warn($"AddFiller vert {i}: LineEnd line not present"); return false; }
+                            line = new MarkingFillerTempLine(marking, p1, p2, (Alignment)vref.Align);
                         var regLine = line as MarkingRegularLine;
                         if (regLine == null)
                         { Log.Warn($"AddFiller vert {i}: LineEnd line is not a RegularLine ({line.GetType().Name})"); return false; }
@@ -245,13 +261,13 @@ namespace CSM.IMTSync.Handlers
                     }
                 case FillerVertexKind.Intersect:
                     {
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P1, out var ia))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P1, out var ia))
                         { Log.Warn($"AddFiller vert {i}: Intersect L1 start unresolved"); return false; }
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P2, out var ib))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P2, out var ib))
                         { Log.Warn($"AddFiller vert {i}: Intersect L1 end unresolved"); return false; }
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P3, out var ic))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P3, out var ic))
                         { Log.Warn($"AddFiller vert {i}: Intersect L2 start unresolved"); return false; }
-                        if (!PointResolver.TryResolveInternalEnterPoint(marking, vref.P4, out var id))
+                        if (!PointResolver.TryResolveInternalPoint(marking, vref.P4, out var id))
                         { Log.Warn($"AddFiller vert {i}: Intersect L2 end unresolved"); return false; }
                         if (!marking.TryGetLine(new MarkingPointPair(ia, ib), out var l1) || l1 == null)
                         { Log.Warn($"AddFiller vert {i}: Intersect L1 line missing"); return false; }
@@ -264,6 +280,15 @@ namespace CSM.IMTSync.Handlers
                     Log.Warn($"AddFiller vert {i}: unknown kind {vref.Kind}");
                     return false;
             }
+        }
+
+        private static void ApplyToolPreview(IMTActionCommand cmd)
+        {
+            Marking marking = null;
+            if (cmd.PreviewKind != ToolPreviewKind.None)
+                marking = ResolveMarking(cmd);
+            Log.Info($"ToolPreview recv {cmd.PreviewKind} from sender {cmd.SenderId} on {cmd.Scope} {cmd.MarkingId} marking={(marking == null ? "null" : "ok")} hasB={cmd.HasB} verts={(cmd.Vertices == null ? 0 : cmd.Vertices.Length)}");
+            PresenceStore.UpdatePreview(cmd.SenderId, cmd, marking);
         }
 
         private static void ApplyRemoveFiller(Marking marking, IMTActionCommand cmd)
@@ -337,6 +362,64 @@ namespace CSM.IMTSync.Handlers
             catch (Exception ex) { Log.Error("SetPointOffset apply threw: " + ex); }
         }
 
+        // ----- Mid-session state push -----
+
+        private static void ApplySnapshotRequest(IMTActionCommand cmd)
+        {
+            // Only the server responds. Clients receive their own broadcast back via SendToAll
+            // but ignore (they're the requester). Other clients also ignore.
+            try
+            {
+                var mm = global::CSM.Networking.MultiplayerManager.Instance;
+                if (mm == null || mm.CurrentRole != global::CSM.API.Commands.MultiplayerRole.Server)
+                {
+                    Log.Info($"SnapshotRequest from sender {cmd.SenderId} ignored (role={mm?.CurrentRole.ToString() ?? "(none)"}).");
+                    return;
+                }
+            }
+            catch (Exception ex) { Log.Warn("SnapshotRequest role check threw: " + ex.Message); return; }
+
+            int sent = 0;
+            try
+            {
+                foreach (var m in SingletonManager<NodeMarkingManager>.Instance)
+                {
+                    var snap = MarkingSnapshotter.BuildSnapshot(m);
+                    if (snap == null) continue;
+                    CsmBridge.SendToAll(snap);
+                    sent++;
+                }
+            }
+            catch (Exception ex) { Log.Error("Enumerating NodeMarkings threw: " + ex); }
+
+            try
+            {
+                foreach (var m in SingletonManager<SegmentMarkingManager>.Instance)
+                {
+                    var snap = MarkingSnapshotter.BuildSnapshot(m);
+                    if (snap == null) continue;
+                    CsmBridge.SendToAll(snap);
+                    sent++;
+                }
+            }
+            catch (Exception ex) { Log.Error("Enumerating SegmentMarkings threw: " + ex); }
+
+            Log.Info($"SnapshotRequest from sender {cmd.SenderId} - sent {sent} marking snapshots.");
+        }
+
+        private static void ApplyMarkingSnapshot(IMTActionCommand cmd)
+        {
+            // Wrap in IgnoreScope so the burst of Add* invocations from FromXml don't re-broadcast.
+            try
+            {
+                using (CsmBridge.StartIgnore())
+                {
+                    MarkingSnapshotter.TryApply(cmd);
+                }
+            }
+            catch (Exception ex) { Log.Error("ApplyMarkingSnapshot threw: " + ex); }
+        }
+
         // ----- CursorPresence (Tier β v1) -----
         // Routes through CSM's ToolSimulatorCursorManager so the cursor sprite + name label
         // render via CSM's PlayerCursorManager, exactly like for vanilla CS tools.
@@ -345,7 +428,7 @@ namespace CSM.IMTSync.Handlers
         {
             try
             {
-                var mgr = ColossalFramework.Singleton<CSM.BaseGame.Injections.Tools.ToolSimulatorCursorManager>.instance;
+                var mgr = ColossalFramework.Singleton<global::CSM.BaseGame.Injections.Tools.ToolSimulatorCursorManager>.instance;
                 if (mgr == null) return;
                 var pcm = mgr.GetCursorView(cmd.SenderId);
                 if (pcm == null) return;
@@ -370,7 +453,7 @@ namespace CSM.IMTSync.Handlers
             string msg = cmd.MarkingId == 0
                 ? $"{who} is no longer editing an intersection."
                 : $"{who} is editing {cmd.Scope} {cmd.MarkingId}.";
-            try { CSM.API.Chat.Instance?.PrintGameMessage(msg); }
+            try { global::CSM.API.Chat.Instance?.PrintGameMessage(msg); }
             catch (Exception ex) { Log.Warn("Chat.PrintGameMessage threw: " + ex.Message); }
 
             // Resolve the marking on the receiver so the render hot-path can iterate entrance
@@ -396,7 +479,7 @@ namespace CSM.IMTSync.Handlers
             {
                 try
                 {
-                    ColossalFramework.Singleton<CSM.BaseGame.Injections.Tools.ToolSimulatorCursorManager>
+                    ColossalFramework.Singleton<global::CSM.BaseGame.Injections.Tools.ToolSimulatorCursorManager>
                         .instance?.RemoveCursorView(cmd.SenderId);
                 }
                 catch (Exception ex) { Log.Warn("RemoveCursorView threw: " + ex.Message); }
@@ -409,10 +492,10 @@ namespace CSM.IMTSync.Handlers
 
         private static void ApplyUpdateLineStyle(Marking marking, IMTActionCommand cmd)
         {
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.A, out var p1))
-            { Log.Info("UpdateLineStyle: cannot resolve start point (line probably gone)"); return; }
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.B, out var p2))
-            { Log.Info("UpdateLineStyle: cannot resolve end point (line probably gone)"); return; }
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var p1))
+            { Log.Info("UpdateLineStyle: cannot resolve start point " + DescribePointRef(cmd.A)); return; }
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var p2))
+            { Log.Info("UpdateLineStyle: cannot resolve end point " + DescribePointRef(cmd.B)); return; }
             if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
             { Log.Info("UpdateLineStyle: line not present on this client"); return; }
             var regLine = line as MarkingRegularLine;
@@ -421,6 +504,7 @@ namespace CSM.IMTSync.Handlers
             { Log.Warn("UpdateLineStyle: line has no rules"); return; }
             if (!StyleSerializer.TryFromXml<LineStyle>(cmd.StyleXml, out var style))
             { Log.Warn("UpdateLineStyle: failed to parse style XML"); return; }
+            Log.Info("UpdateLineStyle parsed " + StyleDiagnostics.Describe(style));
 
             MarkingLineRawRule firstRule = null;
             foreach (var r in regLine.Rules) { firstRule = r; break; }
@@ -436,6 +520,7 @@ namespace CSM.IMTSync.Handlers
             { Log.Warn("UpdateFillerStyle: no vertices to identify filler"); return; }
             if (!StyleSerializer.TryFromXml<BaseFillerStyle>(cmd.StyleXml, out var style))
             { Log.Warn("UpdateFillerStyle: failed to parse style XML"); return; }
+            Log.Info("UpdateFillerStyle parsed " + StyleDiagnostics.Describe(style));
 
             var wantedFp = FillerVertexConverter.Fingerprint(cmd.Vertices);
             MarkingFiller match = null;
@@ -457,10 +542,11 @@ namespace CSM.IMTSync.Handlers
         {
             if (!StyleSerializer.TryFromXml<BaseCrosswalkStyle>(cmd.StyleXml, out var style))
             { Log.Warn("UpdateCrosswalkStyle: failed to parse style XML"); return; }
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.A, out var p1))
-            { Log.Info("UpdateCrosswalkStyle: cannot resolve start point"); return; }
-            if (!PointResolver.TryResolveInternalEnterPoint(marking, cmd.B, out var p2))
-            { Log.Info("UpdateCrosswalkStyle: cannot resolve end point"); return; }
+            Log.Info("UpdateCrosswalkStyle parsed " + StyleDiagnostics.Describe(style));
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var p1))
+            { Log.Info("UpdateCrosswalkStyle: cannot resolve start point " + DescribePointRef(cmd.A)); return; }
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var p2))
+            { Log.Info("UpdateCrosswalkStyle: cannot resolve end point " + DescribePointRef(cmd.B)); return; }
             if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
             { Log.Info("UpdateCrosswalkStyle: underlying crosswalk line not present"); return; }
             var cwLine = line as MarkingCrosswalkLine;
@@ -481,6 +567,11 @@ namespace CSM.IMTSync.Handlers
         private static void LogApplied(IMTActionCommand cmd)
         {
             Log.Info($"Applied remote {cmd.Type} on {cmd.Scope} {cmd.MarkingId}");
+        }
+
+        private static string DescribePointRef(PointRef r)
+        {
+            return $"kind={r.Kind} entrance={r.EntranceId} index={r.Index}";
         }
     }
 }

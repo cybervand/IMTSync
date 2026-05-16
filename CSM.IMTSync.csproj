@@ -23,6 +23,12 @@
     <ModInstallPath>$(CSModsPath)\IMTSync</ModInstallPath>
     <!-- Second CS install (the multiplayer client). Host installs to ModInstallPath above. -->
     <ClientInstallPath>M:\Games\C_S2\Cities Skylines\Files\Mods\IMTSync</ClientInstallPath>
+
+    <!-- A clone of MacSergey/NodeMarkup lives at NodeMarkup-master/ for source-level reference.
+         It contains many .resx files which the SDK would otherwise auto-include via
+         EnableDefaultEmbeddedResourceItems → ResGen → build failure on net35. Exclude it
+         from all default item discovery. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);NodeMarkup-master\**;bin\**;obj\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -58,6 +64,10 @@
     </Reference>
     <Reference Include="CSM.BaseGame">
       <HintPath>$(CSWorkshopPath)\1558438291\CSM.BaseGame.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="CSM">
+      <HintPath>$(CSWorkshopPath)\1558438291\CSM.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="protobuf-net">
