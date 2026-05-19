@@ -9,7 +9,7 @@ multiplayer session. With it, every IMT add/remove/drag action is broadcast and 
 
 ## Status
 
-Pre-alpha. Under active development. Not yet on Steam Workshop.
+Alpha. Under active development. Not yet on Steam Workshop.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ Pre-alpha. Under active development. Not yet on Steam Workshop.
 After building, copy the output DLL to:
 
 ```
-M:\Games\Cities Skylines\Files\Mods\IMTSync\CSM.IMTSync.dll
+Mods\IMTSync\CSM.IMTSync.dll
 ```
 
 ## Build
@@ -36,8 +36,6 @@ Output goes to `bin\Release\net35\CSM.IMTSync.dll`. The post-build step copies i
 to the Cities: Skylines mods folder above.
 
 ## Architecture
-
-See `..\..\..\..\Users\Brewing Storm Lite\.claude\plans\mutable-chasing-falcon.md` for the full design plan.
 
 In short: Harmony postfixes on `IMT.Manager.Marking.Add*` / `Remove*` / `Clear` capture local user
 actions and broadcast them via `CSM.API.Commands.Command.SendToAll`. A handler on the receive side
