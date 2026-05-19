@@ -1,15 +1,14 @@
 # IMT-MP - Multiplayer sync extension for Intersection Marking Tool
 
 A [Cities: Skylines Multiplayer](https://github.com/CitiesSkylinesMultiplayer/CSM) sync extension that
-synchronizes [Intersection Marking Tool](https://steamcommunity.com/sharedfiles/filedetails/?id=2140418403)
+synchronizes [Intersection Marking Tool](https://steamcommunity.com/sharedfiles/filedetails/?id=2140418403)(https://github.com/MacSergey/NodeMarkup)
 actions across all clients in a CSM session.
 
-Without this extension, road markings drawn with IMT only exist on the local client and diverge across the
-multiplayer session. With it, every IMT add/remove/drag action is broadcast and reapplied on remote clients.
+I still need bug testing, the mod works for almost all functions but there most likely a few I haven't tried. but templates and presets seamlessly sync along with lines and fillers. Modded decals also work.
 
 ## Status
 
-Alpha. Under active development. Not yet on Steam Workshop.
+ Under active development. Not yet on Steam Workshop.
 
 ## Requirements
 
