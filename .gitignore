@@ -3,6 +3,8 @@ obj/
 *.user
 *.suo
 *.userprefs
+bin/
+
 
 # Visual Studio / Rider
 .vs/
