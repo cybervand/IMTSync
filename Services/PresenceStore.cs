@@ -40,11 +40,13 @@ namespace CSM.IMTSync.Services
             public FillerVertexRef[] Vertices;
             public bool HasHoverVertex;
             public FillerVertexRef HoverVertex;
+            public float LastSeen;
         }
 
         private static readonly Dictionary<int, Claim> _claims = new Dictionary<int, Claim>();
         private static readonly Dictionary<int, Preview> _previews = new Dictionary<int, Preview>();
         private static readonly object _lock = new object();
+        private const float PreviewLockSeconds = 2.0f;
 
         // Stable, distinguishable palette indexed by senderId. Keeps each player's color
         // consistent across the session.
@@ -91,6 +93,7 @@ namespace CSM.IMTSync.Services
                     return;
                 }
 
+                var now = Time.realtimeSinceStartup;
                 _previews[senderId] = new Preview
                 {
                     Scope = cmd.Scope,
@@ -106,6 +109,7 @@ namespace CSM.IMTSync.Services
                     Vertices = cmd.Vertices,
                     HasHoverVertex = cmd.HasHoverVertex,
                     HoverVertex = cmd.HoverVertex,
+                    LastSeen = now,
                 };
             }
         }
@@ -126,12 +130,56 @@ namespace CSM.IMTSync.Services
 
         public static List<Preview> PreviewSnapshot()
         {
-            lock (_lock) { return new List<Preview>(_previews.Values); }
+            lock (_lock)
+            {
+                PruneExpiredPreviews(Time.realtimeSinceStartup);
+                return new List<Preview>(_previews.Values);
+            }
         }
 
         public static int PreviewCount()
         {
-            lock (_lock) { return _previews.Count; }
+            lock (_lock)
+            {
+                PruneExpiredPreviews(Time.realtimeSinceStartup);
+                return _previews.Count;
+            }
+        }
+
+        public static bool HasActiveConstruction(MarkingScope scope, ushort markingId)
+        {
+            if (markingId == 0) return false;
+            lock (_lock)
+            {
+                PruneExpiredPreviews(Time.realtimeSinceStartup);
+                foreach (var preview in _previews.Values)
+                {
+                    if (preview.Scope == scope && preview.MarkingId == markingId && IsConstruction(preview.Kind))
+                        return true;
+                }
+                return false;
+            }
+        }
+
+        private static bool IsConstruction(ToolPreviewKind kind)
+        {
+            return kind == ToolPreviewKind.Line
+                || kind == ToolPreviewKind.Crosswalk
+                || kind == ToolPreviewKind.Filler;
+        }
+
+        private static void PruneExpiredPreviews(float now)
+        {
+            if (_previews.Count == 0) return;
+
+            var expired = new List<int>();
+            foreach (var pair in _previews)
+            {
+                if (now - pair.Value.LastSeen > PreviewLockSeconds)
+                    expired.Add(pair.Key);
+            }
+            for (var i = 0; i < expired.Count; i++)
+                _previews.Remove(expired[i]);
         }
 
         private static Color ColorFor(int senderId)

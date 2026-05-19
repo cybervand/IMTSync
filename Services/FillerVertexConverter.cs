@@ -83,6 +83,17 @@ namespace CSM.IMTSync.Services
             return string.Join("|", keys.ToArray());
         }
 
+        public static HashSet<string> PointKeySet(FillerVertexRef[] verts)
+        {
+            var set = new HashSet<string>();
+            if (verts == null) return set;
+            for (int i = 0; i < verts.Length; i++)
+            {
+                AddPointKeys(verts[i], set);
+            }
+            return set;
+        }
+
         // ---- internals ----
 
         public static bool TryToVertices(Marking marking, FillerVertexRef[] refs, out List<IFillerVertex> vertices)
@@ -198,7 +209,27 @@ namespace CSM.IMTSync.Services
             }
         }
 
-        private static string PtKey(PointRef r) => r.EntranceId + ":" + r.Index;
+        private static void AddPointKeys(FillerVertexRef v, HashSet<string> set)
+        {
+            switch (v.Kind)
+            {
+                case FillerVertexKind.Enter:
+                    set.Add(PtKey(v.P1));
+                    break;
+                case FillerVertexKind.LineEnd:
+                    set.Add(PtKey(v.P1));
+                    set.Add(PtKey(v.P2));
+                    break;
+                case FillerVertexKind.Intersect:
+                    set.Add(PtKey(v.P1));
+                    set.Add(PtKey(v.P2));
+                    set.Add(PtKey(v.P3));
+                    set.Add(PtKey(v.P4));
+                    break;
+            }
+        }
+
+        private static string PtKey(PointRef r) => r.Kind + ":" + r.EntranceId + ":" + r.Index;
         private static string LineKey(PointRef a, PointRef b)
         {
             var ka = PtKey(a); var kb = PtKey(b);

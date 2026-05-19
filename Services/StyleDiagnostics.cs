@@ -24,8 +24,8 @@ namespace CSM.IMTSync.Services
         public static void RepairPrefabRefs(Style style)
         {
             if (style == null) return;
-            RepairPrefabProperty(style, "Prefab");
-            RepairPrefabProperty(style, "Decal");
+            SafeRepairPrefabProperty(style, "Prefab");
+            SafeRepairPrefabProperty(style, "Decal");
         }
 
         private static string DescribePrefabProperty(object owner, string propertyName)
@@ -46,7 +46,7 @@ namespace CSM.IMTSync.Services
             if (pref == null) return;
 
             var valueProp = pref.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public);
-            if (valueProp == null || valueProp.GetValue(pref, null) != null) return;
+            if (valueProp == null || ReadPropertyValue(pref, valueProp) != null) return;
 
             var raw = ReadStringProperty(pref, "RawName");
             if (string.IsNullOrEmpty(raw)) return;
@@ -64,6 +64,12 @@ namespace CSM.IMTSync.Services
                 valueProp.SetValue(pref, resolved, null);
         }
 
+        private static void SafeRepairPrefabProperty(object owner, string propertyName)
+        {
+            try { RepairPrefabProperty(owner, propertyName); }
+            catch (Exception ex) { Log.Warn($"RepairPrefabProperty({propertyName}) threw: {ex.Message}"); }
+        }
+
         private static string ReadStringProperty(object obj, string propertyName)
         {
             return ReadObjectProperty(obj, propertyName) as string;
@@ -72,9 +78,22 @@ namespace CSM.IMTSync.Services
         private static object ReadObjectProperty(object obj, string propertyName)
         {
             if (obj == null) return null;
-            return obj.GetType()
-                .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)
-                ?.GetValue(obj, null);
+            var prop = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            return ReadPropertyValue(obj, prop);
+        }
+
+        private static object ReadPropertyValue(object obj, PropertyInfo prop)
+        {
+            if (obj == null || prop == null) return null;
+            try
+            {
+                var getter = prop.GetGetMethod(true);
+                return getter == null ? null : getter.Invoke(obj, null);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

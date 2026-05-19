@@ -42,6 +42,18 @@ namespace CSM.IMTSync.Commands
 
         // Transient IMT tool-mode overlay: selected point, hover point, cursor, partial filler contour.
         ToolPreview = 80,
+
+        // Full per-object state pushes. These carry IMT's own XML for the edited object and are
+        // preferred over the older style-only packets when available.
+        UpdateLineState = 81,
+        UpdateCrosswalkState = 82,
+
+        // Saved IMT template lists (Templates and Presets tabs). These are not part of a marking
+        // snapshot; they live in IMT's local template managers.
+        UpsertStyleTemplate = 83,
+        DeleteStyleTemplate = 84,
+        UpsertIntersectionTemplate = 85,
+        DeleteIntersectionTemplate = 86,
     }
 
     public enum ToolPreviewKind : byte

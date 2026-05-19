@@ -25,6 +25,13 @@ namespace CSM.IMTSync.Services
             catch (Exception ex) { Log.Error("StyleSerializer.ToXml threw: " + ex); return null; }
         }
 
+        public static string ToXml(XElement elem)
+        {
+            if (elem == null) return null;
+            try { return elem.ToString(SaveOptions.DisableFormatting); }
+            catch (Exception ex) { Log.Error("StyleSerializer.ToXml(XElement) threw: " + ex); return null; }
+        }
+
         /// <summary>
         /// Mono-2.x-safe XElement loader. XElement.Parse(string) is BROKEN in CS's Mono
         /// runtime because it sets XmlReaderSettings.MaxCharactersFromEntities — a .NET 4.0+
@@ -58,7 +65,8 @@ namespace CSM.IMTSync.Services
                 var map = new ObjectsMap(false, false);
                 if (!Style.FromXml<T>(elem, map, false, false, out style))
                     return false;
-                StyleDiagnostics.RepairPrefabRefs(style);
+                try { StyleDiagnostics.RepairPrefabRefs(style); }
+                catch (Exception ex) { Log.Warn("StyleDiagnostics.RepairPrefabRefs threw: " + ex.Message); }
                 return true;
             }
             catch (Exception ex)

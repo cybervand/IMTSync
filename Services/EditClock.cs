@@ -74,9 +74,12 @@ namespace CSM.IMTSync.Services
                 case IMTActionType.RemoveStopLine:
                 case IMTActionType.RemoveLaneLine:
                 case IMTActionType.RemoveCrosswalk:
-                case IMTActionType.UpdateLineStyle:
                 case IMTActionType.UpdateCrosswalkStyle:
+                case IMTActionType.UpdateLineState:
+                case IMTActionType.UpdateCrosswalkState:
                     return "L:" + cmd.MarkingId + ":" + PairKey(cmd.A, cmd.B);
+                case IMTActionType.UpdateLineStyle:
+                    return "L:" + cmd.MarkingId + ":" + PairKey(cmd.A, cmd.B) + ":R" + cmd.RuleIndex;
 
                 case IMTActionType.AddFiller:
                 case IMTActionType.RemoveFiller:
@@ -85,6 +88,13 @@ namespace CSM.IMTSync.Services
 
                 case IMTActionType.SetPointOffset:
                     return "P:" + cmd.MarkingId + ":" + cmd.A.EntranceId + ":" + cmd.A.Index;
+
+                case IMTActionType.UpsertStyleTemplate:
+                case IMTActionType.DeleteStyleTemplate:
+                    return "ST:" + cmd.TemplateId;
+                case IMTActionType.UpsertIntersectionTemplate:
+                case IMTActionType.DeleteIntersectionTemplate:
+                    return "IT:" + cmd.TemplateId;
 
                 case IMTActionType.ClearMarking:
                 case IMTActionType.ResetOffsets:
@@ -151,6 +161,8 @@ namespace CSM.IMTSync.Services
                 case IMTActionType.RemoveLaneLine:
                 case IMTActionType.RemoveCrosswalk:
                 case IMTActionType.RemoveFiller:
+                case IMTActionType.DeleteStyleTemplate:
+                case IMTActionType.DeleteIntersectionTemplate:
                     return true;
                 default:
                     return false;

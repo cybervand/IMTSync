@@ -7,6 +7,7 @@ using HarmonyLib;
 using IMT.Manager;
 using IMT.Tools;
 using IMT.UI.Editors;
+using IMT.Utilities;
 using ModsCommon;
 using ModsCommon.Utilities;
 using UnityEngine;
@@ -52,6 +53,110 @@ namespace CSM.IMTSync.Injections
         }
     }
 
+    internal static class TemplatePatchHelpers
+    {
+        public static void Send(IMTActionCommand cmd, string source)
+        {
+            if (CsmBridge.IsIgnoring()) return;
+            if (cmd == null)
+            {
+                Log.Info($"{source} - no template command built.");
+                return;
+            }
+            Log.Info($"{source} - broadcasting {cmd.Type} {cmd.TemplateId}.");
+            CsmBridge.SendToAll(cmd);
+        }
+    }
+
+    // ----- Saved style templates / intersection presets -----
+    // These live in IMT's template managers, not in a Marking.ToXml snapshot. Patch the manager
+    // layer so line-rule, filler, crosswalk template saves and preset saves all share one path.
+
+    [HarmonyPatch]
+    public static class StyleTemplateManager_AddNamedTemplateFromStyle_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(StyleTemplateManager), "AddTemplate", new System.Type[] { typeof(string), typeof(Style), typeof(StyleTemplate).MakeByRefType() }) ??
+            AccessTools.Method(typeof(TemplateManager<StyleTemplate, Style>), "AddTemplate", new System.Type[] { typeof(string), typeof(Style), typeof(StyleTemplate).MakeByRefType() });
+
+        [HarmonyPostfix]
+        public static void Postfix(bool __result, StyleTemplate template)
+        {
+            if (!__result) return;
+            TemplatePatchHelpers.Send(TemplateSync.BuildUpsert(template), "StyleTemplate AddTemplate(name, style)");
+        }
+    }
+
+    [HarmonyPatch]
+    public static class StyleTemplateManager_TemplateChanged_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(StyleTemplateManager), "TemplateChanged", new System.Type[] { typeof(StyleTemplate) }) ??
+            AccessTools.Method(typeof(TemplateManager<StyleTemplate>), "TemplateChanged", new System.Type[] { typeof(StyleTemplate) });
+
+        [HarmonyPostfix]
+        public static void Postfix(StyleTemplate template)
+        {
+            TemplatePatchHelpers.Send(TemplateSync.BuildUpsert(template), "StyleTemplate TemplateChanged");
+        }
+    }
+
+    [HarmonyPatch]
+    public static class StyleTemplateManager_DeleteTemplate_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(StyleTemplateManager), "DeleteTemplate", new System.Type[] { typeof(StyleTemplate) }) ??
+            AccessTools.Method(typeof(TemplateManager<StyleTemplate>), "DeleteTemplate", new System.Type[] { typeof(StyleTemplate) });
+
+        [HarmonyPrefix]
+        public static void Prefix(StyleTemplate template)
+        {
+            TemplatePatchHelpers.Send(TemplateSync.BuildDelete(template), "StyleTemplate DeleteTemplate");
+        }
+    }
+
+    [HarmonyPatch]
+    public static class IntersectionTemplateManager_AddTemplateFromMarking_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(IntersectionTemplateManager), "AddTemplate", new System.Type[] { typeof(Marking), typeof(ColossalFramework.Importers.Image), typeof(IntersectionTemplate).MakeByRefType() });
+
+        [HarmonyPostfix]
+        public static void Postfix(bool __result, ColossalFramework.Importers.Image image, IntersectionTemplate template)
+        {
+            if (!__result) return;
+            TemplatePatchHelpers.Send(TemplateSync.BuildUpsert(template, image), "IntersectionTemplate AddTemplate(marking)");
+        }
+    }
+
+    [HarmonyPatch]
+    public static class IntersectionTemplateManager_TemplateChanged_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(IntersectionTemplateManager), "TemplateChanged", new System.Type[] { typeof(IntersectionTemplate) }) ??
+            AccessTools.Method(typeof(TemplateManager<IntersectionTemplate>), "TemplateChanged", new System.Type[] { typeof(IntersectionTemplate) });
+
+        [HarmonyPostfix]
+        public static void Postfix(IntersectionTemplate template)
+        {
+            TemplatePatchHelpers.Send(TemplateSync.BuildUpsert(template), "IntersectionTemplate TemplateChanged");
+        }
+    }
+
+    [HarmonyPatch]
+    public static class IntersectionTemplateManager_DeleteTemplate_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(IntersectionTemplateManager), "DeleteTemplate", new System.Type[] { typeof(IntersectionTemplate) }) ??
+            AccessTools.Method(typeof(TemplateManager<IntersectionTemplate>), "DeleteTemplate", new System.Type[] { typeof(IntersectionTemplate) });
+
+        [HarmonyPrefix]
+        public static void Prefix(IntersectionTemplate template)
+        {
+            TemplatePatchHelpers.Send(TemplateSync.BuildDelete(template), "IntersectionTemplate DeleteTemplate");
+        }
+    }
+
     // ----- ClearMarking -----
 
     [HarmonyPatch(typeof(Marking), nameof(Marking.Clear))]
@@ -69,6 +174,26 @@ namespace CSM.IMTSync.Injections
             };
             Log.Info($"Local Marking.Clear on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Marking_FromXml_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(Marking), nameof(Marking.FromXml), new System.Type[] { typeof(System.Version), typeof(System.Xml.Linq.XElement), typeof(ObjectsMap), typeof(bool) });
+
+        [HarmonyPostfix]
+        public static void Postfix(Marking __instance)
+        {
+            if (CsmBridge.IsIgnoring() || __instance == null) return;
+            if (global::CSM.API.Commands.Command.SendToAll == null) return;
+
+            var snap = MarkingSnapshotter.BuildSnapshot(__instance);
+            if (snap == null) return;
+
+            Log.Info($"Local Marking.FromXml on {snap.Scope} {snap.MarkingId} - broadcasting snapshot.");
+            CsmBridge.SendToAll(snap);
         }
     }
 
@@ -98,7 +223,7 @@ namespace CSM.IMTSync.Injections
     public static class Marking_AddRegularLine_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style, Alignment alignment)
+        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style, Alignment alignment, MarkingRegularLine __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || style == null) return;
             var styleXml = StyleSerializer.ToXml(style);
@@ -112,6 +237,7 @@ namespace CSM.IMTSync.Injections
                 B = PatchHelpers.ToPointRef(pointPair.Second),
                 StyleXml = styleXml,
                 Alignment = (byte)alignment,
+                LineXml = StyleSerializer.ToXml(__result?.ToXml()),
             };
             Log.Info($"Local Marking.AddRegularLine on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
@@ -124,7 +250,7 @@ namespace CSM.IMTSync.Injections
     public static class Marking_AddNormalLine_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style, Alignment alignment)
+        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style, Alignment alignment, MarkingNormalLine __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || style == null) return;
             var styleXml = StyleSerializer.ToXml(style);
@@ -138,6 +264,7 @@ namespace CSM.IMTSync.Injections
                 B = PatchHelpers.ToPointRef(pointPair.Second),
                 StyleXml = styleXml,
                 Alignment = (byte)alignment,
+                LineXml = StyleSerializer.ToXml(__result?.ToXml()),
             };
             Log.Info($"Local Marking.AddNormalLine on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
@@ -150,7 +277,7 @@ namespace CSM.IMTSync.Injections
     public static class Marking_AddStopLine_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, MarkingPointPair pointPair, StopLineStyle style)
+        public static void Postfix(Marking __instance, MarkingPointPair pointPair, StopLineStyle style, MarkingStopLine __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || style == null) return;
             var styleXml = StyleSerializer.ToXml(style);
@@ -163,6 +290,7 @@ namespace CSM.IMTSync.Injections
                 A = PatchHelpers.ToPointRef(pointPair.First),
                 B = PatchHelpers.ToPointRef(pointPair.Second),
                 StyleXml = styleXml,
+                LineXml = StyleSerializer.ToXml(__result?.ToXml()),
             };
             Log.Info($"Local Marking.AddStopLine on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
@@ -175,7 +303,7 @@ namespace CSM.IMTSync.Injections
     public static class Marking_AddLaneLine_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style)
+        public static void Postfix(Marking __instance, MarkingPointPair pointPair, RegularLineStyle style, MarkingLaneLine __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || style == null) return;
             var styleXml = StyleSerializer.ToXml(style);
@@ -188,6 +316,7 @@ namespace CSM.IMTSync.Injections
                 A = PatchHelpers.ToPointRef(pointPair.First, PointKind.Lane),
                 B = PatchHelpers.ToPointRef(pointPair.Second, PointKind.Lane),
                 StyleXml = styleXml,
+                LineXml = StyleSerializer.ToXml(__result?.ToXml()),
             };
             Log.Info($"Local Marking.AddLaneLine on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
@@ -200,7 +329,7 @@ namespace CSM.IMTSync.Injections
     public static class Marking_AddCrosswalkLine_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, MarkingPointPair pointPair, BaseCrosswalkStyle style)
+        public static void Postfix(Marking __instance, MarkingPointPair pointPair, BaseCrosswalkStyle style, MarkingCrosswalkLine __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || style == null) return;
             var styleXml = StyleSerializer.ToXml(style);
@@ -213,6 +342,8 @@ namespace CSM.IMTSync.Injections
                 A = PatchHelpers.ToPointRef(pointPair.First, PointKind.Crosswalk),
                 B = PatchHelpers.ToPointRef(pointPair.Second, PointKind.Crosswalk),
                 StyleXml = styleXml,
+                LineXml = StyleSerializer.ToXml(__result?.ToXml()),
+                CrosswalkXml = StyleSerializer.ToXml(__result?.Crosswalk?.ToXml()),
             };
             Log.Info($"Local Marking.AddCrosswalkLine on {cmd.Scope} {__instance.Id} - broadcasting.");
             CsmBridge.SendToAll(cmd);
@@ -236,7 +367,7 @@ namespace CSM.IMTSync.Injections
         }
 
         [HarmonyPostfix]
-        public static void Postfix(Marking __instance, FillerContour contour, BaseFillerStyle style)
+        public static void Postfix(Marking __instance, FillerContour contour, BaseFillerStyle style, MarkingFiller __result)
         {
             if (CsmBridge.IsIgnoring() || __instance == null || contour == null || style == null) return;
 
@@ -255,10 +386,11 @@ namespace CSM.IMTSync.Injections
                 Type = IMTActionType.AddFiller,
                 Scope = PatchHelpers.ScopeOf(__instance),
                 MarkingId = __instance.Id,
+                FillerId = __result?.Id ?? 0,
                 Vertices = verts,
                 StyleXml = styleXml,
             };
-            Log.Info($"Local Marking.AddFiller on {cmd.Scope} {__instance.Id} ({verts.Length} verts) - broadcasting.");
+            Log.Info($"Local Marking.AddFiller on {cmd.Scope} {__instance.Id} filler={cmd.FillerId} ({verts.Length} verts) - broadcasting.");
             CsmBridge.SendToAll(cmd);
         }
     }
@@ -284,9 +416,10 @@ namespace CSM.IMTSync.Injections
                 Type = IMTActionType.RemoveFiller,
                 Scope = PatchHelpers.ScopeOf(__instance),
                 MarkingId = __instance.Id,
+                FillerId = filler.Id,
                 Vertices = verts,
             };
-            Log.Info($"Local Marking.RemoveFiller on {cmd.Scope} {__instance.Id} ({verts.Length} verts) - broadcasting.");
+            Log.Info($"Local Marking.RemoveFiller on {cmd.Scope} {__instance.Id} filler={cmd.FillerId} ({verts.Length} verts) - broadcasting.");
             CsmBridge.SendToAll(cmd);
         }
     }
@@ -318,7 +451,6 @@ namespace CSM.IMTSync.Injections
         private static float _lastPreviewTime;
         private static bool _previewActive;
         private static ToolPreviewKind _lastLoggedPreviewKind;
-        private static float _lastOverlayDebugTime;
 
         static MethodBase TargetMethod()
         {
@@ -347,21 +479,15 @@ namespace CSM.IMTSync.Injections
 
             // (4) Flush any debounced style edits whose elements have settled (10 Hz max effective rate)
             StyleEditDebouncer.FlushReady();
+            SnapshotDeferral.FlushReady();
+            TemplateSync.FlushDeferredPreviews();
+            ImtUiRefresh.FlushReady();
 
             var claims = PresenceStore.Snapshot();
             foreach (var c in claims)
             {
                 // Big claim ring at the intersection center
-                if (PresenceStore.TryGetWorldPosition(c.Scope, c.MarkingId, out var pos))
-                {
-                    RenderExtension.RenderCircle(pos, new OverlayData(cameraInfo)
-                    {
-                        Color = c.RingColor,
-                        Width = 24f,
-                        RenderLimit = true,
-                        AlphaBlend = true,
-                    });
-                }
+                RenderClaimFootprint(cameraInfo, c);
 
                 // Tier α: entrance-point dots - same colored circles IMT draws for the local user
                 if (c.Marking != null)
@@ -581,27 +707,10 @@ namespace CSM.IMTSync.Injections
 
         public static void RenderRemotePresenceAndPreviews(RenderManager.CameraInfo cameraInfo)
         {
-            if (Time.realtimeSinceStartup - _lastOverlayDebugTime > 2f)
-            {
-                _lastOverlayDebugTime = Time.realtimeSinceStartup;
-                var previewCount = PresenceStore.PreviewCount();
-                if (previewCount > 0)
-                    Log.Info($"Overlay render pass: previews={previewCount}");
-            }
-
             var claims = PresenceStore.Snapshot();
             foreach (var c in claims)
             {
-                if (PresenceStore.TryGetWorldPosition(c.Scope, c.MarkingId, out var pos))
-                {
-                    RenderExtension.RenderCircle(pos, new OverlayData(cameraInfo)
-                    {
-                        Color = c.RingColor,
-                        Width = 24f,
-                        RenderLimit = true,
-                        AlphaBlend = true,
-                    });
-                }
+                RenderClaimFootprint(cameraInfo, c);
 
                 if (c.Marking != null)
                 {
@@ -624,6 +733,75 @@ namespace CSM.IMTSync.Injections
             }
 
             RenderRemoteToolPreviews(cameraInfo);
+        }
+
+        private static void RenderClaimFootprint(RenderManager.CameraInfo cameraInfo, PresenceStore.Claim claim)
+        {
+            if (claim.Marking != null && TryRenderMarkingContour(cameraInfo, claim.Marking, claim.RingColor))
+                return;
+
+            if (PresenceStore.TryGetWorldPosition(claim.Scope, claim.MarkingId, out var pos))
+            {
+                RenderExtension.RenderCircle(pos, new OverlayData(cameraInfo)
+                {
+                    Color = claim.RingColor,
+                    Width = 24f,
+                    RenderLimit = true,
+                    AlphaBlend = true,
+                });
+            }
+        }
+
+        private static bool TryRenderMarkingContour(RenderManager.CameraInfo cameraInfo, Marking marking, Color color)
+        {
+            if (marking == null) return false;
+
+            var outline = new OverlayData(cameraInfo)
+            {
+                Color = color,
+                Width = 1.15f,
+                RenderLimit = true,
+                AlphaBlend = true,
+            };
+
+            var trajectories = new List<ITrajectory>();
+            var renderedAny = false;
+            try
+            {
+                foreach (var trajectory in marking.Contour)
+                {
+                    if (trajectory == null || trajectory.IsZero) continue;
+                    trajectories.Add(trajectory);
+                    renderedAny = true;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warn("Render marking contour threw: " + ex.Message);
+                return false;
+            }
+
+            if (!renderedAny) return false;
+            for (var i = 0; i < trajectories.Count; i++)
+                RenderTrajectory(trajectories[i], outline);
+            return true;
+        }
+
+        private static void RenderTrajectory(ITrajectory trajectory, OverlayData data)
+        {
+            if (trajectory is StraightTrajectory straight)
+            {
+                straight.Render(data);
+                return;
+            }
+
+            if (trajectory is BezierTrajectory bezier)
+            {
+                bezier.Render(data);
+                return;
+            }
+
+            new Line3(trajectory.StartPosition, trajectory.EndPosition).GetBezier().RenderBezier(data);
         }
 
         private static void RenderRemoteToolPreviews(RenderManager.CameraInfo cameraInfo)
@@ -790,6 +968,11 @@ namespace CSM.IMTSync.Injections
                     var mm = global::CSM.Networking.MultiplayerManager.Instance;
                     if (mm != null && mm.CurrentRole == global::CSM.API.Commands.MultiplayerRole.Server)
                     {
+                        if (PresenceStore.HasActiveConstruction(scope, id))
+                        {
+                            SnapshotDeferral.Request(scope, id, "selection while construction preview is active");
+                            return;
+                        }
                         var snap = MarkingSnapshotter.BuildSnapshot(marking);
                         if (snap != null)
                         {
@@ -800,6 +983,143 @@ namespace CSM.IMTSync.Injections
                 }
                 catch (System.Exception ex) { Log.Warn("Server snapshot-on-SetMarking threw: " + ex.Message); }
             }
+        }
+    }
+
+    // ----- Template / paste application -----
+    // IntersectionMarkingTool.ApplyIntersectionTemplate / PasteMarking / EditMarking each replace
+    // the current marking's state by calling Marking.Clear + Marking.FromXml internally. Without
+    // intervention that would trigger our per-element patches (AddLine, Marking.Update, etc.) for
+    // each rebuilt line/filler/crosswalk, flooding the network. We wrap the apply in IgnoreHelper
+    // so those inner patches short-circuit, then broadcast a single MarkingSnapshot at the end.
+    //
+    // Broadcast from whichever player applied the template. Preset apply is a user edit, so clients
+    // need to send the resulting marking state to the host just like line/filler/crosswalk edits do.
+    //
+    // PasteMarking and EditMarking are private on IMT.Tools.IntersectionMarkingTool, so patched
+    // via string name. ApplyIntersectionTemplate is public.
+
+    internal static class TemplateApplyHelpers
+    {
+        public static void BroadcastSnapshot(IntersectionMarkingTool tool, string source)
+        {
+            if (tool == null) return;
+            if (tool.Mode is BaseOrderToolMode)
+            {
+                Log.Info($"{source} entered order mode - final snapshot deferred until apply.");
+                return;
+            }
+
+            BroadcastSnapshot(tool.Marking, source);
+        }
+
+        public static void BroadcastSnapshot(Marking marking, string source)
+        {
+            if (marking == null) return;
+            try
+            {
+                var snap = MarkingSnapshotter.BuildSnapshot(marking);
+                if (snap == null) return;
+                Log.Info($"{source} on {PatchHelpers.ScopeOf(marking)} {marking.Id} - broadcasting snapshot.");
+                CsmBridge.SendToAll(snap);
+            }
+            catch (System.Exception ex) { Log.Warn($"{source}: snapshot broadcast threw: {ex.Message}"); }
+        }
+    }
+
+    [HarmonyPatch(typeof(IntersectionMarkingTool), nameof(IntersectionMarkingTool.ApplyIntersectionTemplate))]
+    public static class IntersectionMarkingTool_ApplyIntersectionTemplate_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() { global::CSM.API.Helpers.IgnoreHelper.Instance.StartIgnore(); }
+
+        [HarmonyPostfix]
+        public static void Postfix(IntersectionMarkingTool __instance)
+        {
+            try { TemplateApplyHelpers.BroadcastSnapshot(__instance, "ApplyIntersectionTemplate"); }
+            finally { global::CSM.API.Helpers.IgnoreHelper.Instance.EndIgnore(); }
+        }
+    }
+
+    [HarmonyPatch(typeof(IntersectionMarkingTool), "PasteMarking")]
+    public static class IntersectionMarkingTool_PasteMarking_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() { global::CSM.API.Helpers.IgnoreHelper.Instance.StartIgnore(); }
+
+        [HarmonyPostfix]
+        public static void Postfix(IntersectionMarkingTool __instance)
+        {
+            try { TemplateApplyHelpers.BroadcastSnapshot(__instance, "PasteMarking"); }
+            finally { global::CSM.API.Helpers.IgnoreHelper.Instance.EndIgnore(); }
+        }
+    }
+
+    [HarmonyPatch(typeof(IntersectionMarkingTool), "EditMarking")]
+    public static class IntersectionMarkingTool_EditMarking_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() { global::CSM.API.Helpers.IgnoreHelper.Instance.StartIgnore(); }
+
+        [HarmonyPostfix]
+        public static void Postfix(IntersectionMarkingTool __instance)
+        {
+            try { TemplateApplyHelpers.BroadcastSnapshot(__instance, "EditMarking"); }
+            finally { global::CSM.API.Helpers.IgnoreHelper.Instance.EndIgnore(); }
+        }
+    }
+
+    [HarmonyPatch]
+    public static class BaseOrderToolMode_Paste_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(BaseOrderToolMode), "Paste");
+
+        [HarmonyPrefix]
+        public static void Prefix(out System.IDisposable __state)
+        {
+            __state = CsmBridge.StartIgnore();
+        }
+
+        [HarmonyFinalizer]
+        public static System.Exception Finalizer(System.Exception __exception, System.IDisposable __state)
+        {
+            __state?.Dispose();
+            return __exception;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class BaseEntersOrderToolMode_Exit_Patch
+    {
+        static MethodBase TargetMethod() =>
+            AccessTools.Method(typeof(BaseEntersOrderToolMode), "Exit");
+
+        [HarmonyPrefix]
+        public static void Prefix(out System.IDisposable __state)
+        {
+            __state = CsmBridge.StartIgnore();
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(BaseEntersOrderToolMode __instance, bool revert, System.IDisposable __state)
+        {
+            try
+            {
+                if (!revert)
+                    TemplateApplyHelpers.BroadcastSnapshot(__instance?.Marking, "OrderModeApply");
+            }
+            finally
+            {
+                __state?.Dispose();
+            }
+        }
+
+        [HarmonyFinalizer]
+        public static System.Exception Finalizer(System.Exception __exception, System.IDisposable __state)
+        {
+            __state?.Dispose();
+            return __exception;
         }
     }
 
@@ -897,11 +1217,45 @@ namespace CSM.IMTSync.Injections
                 Type = IMTActionType.UpdateFillerStyle,
                 Scope = PatchHelpers.ScopeOf(marking),
                 MarkingId = marking.Id,
+                FillerId = __instance.Id,
                 Vertices = verts,
                 StyleXml = styleXml,
             };
             // Debounced: rapid slider drags coalesce into one broadcast after 100ms settle.
             var elementId = EditClock.ElementIdFor(cmd) ?? ("F:" + marking.Id);
+            StyleEditDebouncer.MarkDirty(elementId, cmd);
+        }
+    }
+
+    // ----- UpdateLineState -----
+    // Marking.Update(MarkingLine, ...) is the common path for line-level settings (alignment,
+    // clip sidewalk) and rule structure/style updates. Send the full IMT <L ...> state so
+    // receivers replace the whole line instead of trying to mirror every individual control.
+
+    [HarmonyPatch(typeof(Marking), nameof(Marking.Update), new System.Type[] { typeof(MarkingLine), typeof(bool), typeof(bool) })]
+    public static class Marking_UpdateLine_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Marking __instance, MarkingLine line)
+        {
+            if (CsmBridge.IsIgnoring() || __instance == null || line == null) return;
+            if (line is MarkingCrosswalkLine) return; // crosswalks have their own full-state packet
+            if (line.Start == null || line.End == null) return;
+
+            var lineXml = StyleSerializer.ToXml(line.ToXml());
+            if (lineXml == null) { Log.Warn("UpdateLineState: failed to serialize line."); return; }
+
+            var cmd = new IMTActionCommand
+            {
+                Type = IMTActionType.UpdateLineState,
+                Scope = PatchHelpers.ScopeOf(__instance),
+                MarkingId = __instance.Id,
+                A = PatchHelpers.ToPointRef(line.Start),
+                B = PatchHelpers.ToPointRef(line.End),
+                LineXml = lineXml,
+            };
+
+            var elementId = EditClock.ElementIdFor(cmd) ?? ("L:" + __instance.Id);
             StyleEditDebouncer.MarkDirty(elementId, cmd);
         }
     }
@@ -929,16 +1283,36 @@ namespace CSM.IMTSync.Injections
 
             var cmd = new IMTActionCommand
             {
-                Type = IMTActionType.UpdateCrosswalkStyle,
+                Type = IMTActionType.UpdateCrosswalkState,
                 Scope = PatchHelpers.ScopeOf(marking),
                 MarkingId = marking.Id,
                 A = PatchHelpers.ToPointRef(line.Start, PointKind.Crosswalk),
                 B = PatchHelpers.ToPointRef(line.End, PointKind.Crosswalk),
                 StyleXml = styleXml,
+                CrosswalkXml = StyleSerializer.ToXml(__instance.ToXml()),
             };
+            AddBorderRefs(__instance.RightBorder?.Value, true, cmd);
+            AddBorderRefs(__instance.LeftBorder?.Value, false, cmd);
             // Debounced: rapid slider drags coalesce into one broadcast after 100ms settle.
             var elementId = EditClock.ElementIdFor(cmd) ?? ("CW:" + marking.Id);
             StyleEditDebouncer.MarkDirty(elementId, cmd);
+        }
+
+        private static void AddBorderRefs(MarkingRegularLine border, bool right, IMTActionCommand cmd)
+        {
+            if (border == null || border.Start == null || border.End == null) return;
+            if (right)
+            {
+                cmd.HasRightBorder = true;
+                cmd.RightBorderA = PatchHelpers.ToPointRef(border.Start);
+                cmd.RightBorderB = PatchHelpers.ToPointRef(border.End);
+            }
+            else
+            {
+                cmd.HasLeftBorder = true;
+                cmd.LeftBorderA = PatchHelpers.ToPointRef(border.Start);
+                cmd.LeftBorderB = PatchHelpers.ToPointRef(border.End);
+            }
         }
     }
 
@@ -962,6 +1336,11 @@ namespace CSM.IMTSync.Injections
         [HarmonyPostfix]
         public static void Postfix(MarkingLinePart __instance)
         {
+            // Full line state is now sent by Marking_UpdateLine_Patch. Keeping this Harmony patch
+            // inert avoids duplicate style-only packets while preserving the old receiver path for
+            // compatibility with already-emitted UpdateLineStyle commands.
+            return;
+#pragma warning disable CS0162
             if (CsmBridge.IsIgnoring() || __instance == null) return;
             var rawRule = __instance as MarkingLineRawRule;
             if (rawRule == null) return;
@@ -970,16 +1349,24 @@ namespace CSM.IMTSync.Injections
             var marking = line.Marking;
             if (marking == null) return;
             if (line.RuleCount == 0) return;
-            // First rule only - v1 single-rule simplification. Multi-rule lines need richer wire format.
-            MarkingLineRawRule firstRule = null;
-            foreach (var r in line.Rules) { firstRule = r; break; }
-            if (!System.Object.ReferenceEquals(firstRule, rawRule)) return;
+            var ruleIndex = -1;
+            var currentIndex = 0;
+            foreach (var r in line.Rules)
+            {
+                if (System.Object.ReferenceEquals(r, rawRule))
+                {
+                    ruleIndex = currentIndex;
+                    break;
+                }
+                currentIndex++;
+            }
+            if (ruleIndex < 0) return;
             var style = rawRule.Style?.Value;
             if (style == null) return;
 
             var styleXml = StyleSerializer.ToXml(style);
             if (styleXml == null) { Log.Warn("UpdateLineStyle: failed to serialize style."); return; }
-            Log.Info("UpdateLineStyle send " + StyleDiagnostics.Describe(style));
+            Log.Info($"UpdateLineStyle send rule={ruleIndex} " + StyleDiagnostics.Describe(style));
 
             var cmd = new IMTActionCommand
             {
@@ -988,11 +1375,13 @@ namespace CSM.IMTSync.Injections
                 MarkingId = marking.Id,
                 A = PatchHelpers.ToPointRef(line.Start),
                 B = PatchHelpers.ToPointRef(line.End),
+                RuleIndex = ruleIndex,
                 StyleXml = styleXml,
             };
             // Debounced: rapid slider drags coalesce into one broadcast after 100ms settle.
             var elementId = EditClock.ElementIdFor(cmd) ?? ("L:" + marking.Id);
             StyleEditDebouncer.MarkDirty(elementId, cmd);
+#pragma warning restore CS0162
         }
     }
 

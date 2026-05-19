@@ -1,9 +1,13 @@
 using System;
+using System.Collections;
+using System.Reflection;
+using System.Xml.Linq;
 using CSM.API.Commands;
 using CSM.IMTSync.Commands;
 using CSM.IMTSync.Services;
 using IMT.API;
 using IMT.Manager;
+using IMT.Utilities;
 using ModsCommon;
 // Alignment exists in both IMT.API and IMT.Manager - we use the Manager one (the patch sees it).
 using Alignment = IMT.Manager.Alignment;
@@ -16,6 +20,9 @@ namespace CSM.IMTSync.Handlers
     /// </summary>
     public class IMTActionHandler : CommandHandler<IMTActionCommand>
     {
+        private static readonly FieldInfo RegularLineRawRulesField =
+            typeof(MarkingRegularLine).GetField("<RawRules>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+
         protected override void Handle(IMTActionCommand cmd)
         {
             if (cmd == null) { Log.Warn("Handle called with null command"); return; }
@@ -63,6 +70,21 @@ namespace CSM.IMTSync.Handlers
                 ApplyMarkingSnapshot(cmd);
                 return;
             }
+            if (cmd.Type == IMTActionType.UpsertStyleTemplate || cmd.Type == IMTActionType.DeleteStyleTemplate ||
+                cmd.Type == IMTActionType.UpsertIntersectionTemplate || cmd.Type == IMTActionType.DeleteIntersectionTemplate)
+            {
+                using (CsmBridge.StartIgnore())
+                {
+                    if (cmd.Type == IMTActionType.UpsertStyleTemplate || cmd.Type == IMTActionType.UpsertIntersectionTemplate)
+                        TemplateSync.ApplyUpsert(cmd);
+                    else
+                        TemplateSync.ApplyDelete(cmd);
+                }
+                ImtUiRefresh.RequestCurrentPanel();
+                if (elementId != null)
+                    EditClock.Record(elementId, cmd.Version, EditClock.IsRemoveAction(cmd.Type));
+                return;
+            }
 
             try
             {
@@ -81,7 +103,7 @@ namespace CSM.IMTSync.Handlers
                     switch (cmd.Type)
                     {
                         // Whole-marking ops
-                        case IMTActionType.ClearMarking:  marking.Clear(); LogApplied(cmd); break;
+                        case IMTActionType.ClearMarking:  marking.Clear(); FillerIdMap.ForgetMarking(cmd.Scope, cmd.MarkingId); LogApplied(cmd); break;
                         case IMTActionType.ResetOffsets:  marking.ResetOffsets(); LogApplied(cmd); break;
 
                         // Line adds (use internal Manager types: MarkingPointPair + concrete style)
@@ -111,6 +133,8 @@ namespace CSM.IMTSync.Handlers
                         case IMTActionType.UpdateLineStyle:      ApplyUpdateLineStyle(marking, cmd); break;
                         case IMTActionType.UpdateFillerStyle:    ApplyUpdateFillerStyle(marking, cmd); break;
                         case IMTActionType.UpdateCrosswalkStyle: ApplyUpdateCrosswalkStyle(marking, cmd); break;
+                        case IMTActionType.UpdateLineState:      ApplyUpdateLineState(marking, cmd); break;
+                        case IMTActionType.UpdateCrosswalkState: ApplyUpdateCrosswalkState(marking, cmd); break;
 
                         default:
                             Log.Warn($"Unhandled IMTActionType: {cmd.Type}");
@@ -145,7 +169,7 @@ namespace CSM.IMTSync.Handlers
             return null;
         }
 
-        private delegate void AddLineCall<TStyle>(Marking marking, MarkingPointPair pair, TStyle style) where TStyle : Style;
+        private delegate MarkingLine AddLineCall<TStyle>(Marking marking, MarkingPointPair pair, TStyle style) where TStyle : Style;
 
         private static void ApplyAddLine<TStyle>(Marking marking, IMTActionCommand cmd, AddLineCall<TStyle> add) where TStyle : Style
         {
@@ -156,7 +180,15 @@ namespace CSM.IMTSync.Handlers
             if (!StyleSerializer.TryFromXml<TStyle>(cmd.StyleXml, out var style))
             { Log.Warn($"{cmd.Type}: failed to parse style XML"); return; }
 
-            try { add(marking, new MarkingPointPair(startPt, endPt), style); LogApplied(cmd); }
+            try
+            {
+                var line = add(marking, new MarkingPointPair(startPt, endPt), style);
+                if (!string.IsNullOrEmpty(cmd.LineXml))
+                    ApplyLineXml(marking, line, cmd.LineXml, cmd.Type.ToString());
+                if (!string.IsNullOrEmpty(cmd.CrosswalkXml))
+                    ApplyCrosswalkXml(marking, cmd, cmd.Type.ToString());
+                LogApplied(cmd);
+            }
             catch (Exception ex) { Log.Error($"{cmd.Type} apply threw: " + ex); }
         }
 
@@ -199,7 +231,8 @@ namespace CSM.IMTSync.Handlers
                 {
                     var contour = new FillerContour(marking, verts);
                     System.Collections.Generic.List<MarkingRegularLine> _;
-                    marking.AddFiller(contour, style, out _);
+                    var filler = marking.AddFiller(contour, style, out _);
+                    FillerIdMap.Remember(cmd, filler);
                     LogApplied(cmd);
                 }
                 catch (System.Exception ex) { Log.Error("AddFiller apply threw: " + ex); }
@@ -227,7 +260,8 @@ namespace CSM.IMTSync.Handlers
             {
                 var contour = new FillerContour(marking, lverts);
                 System.Collections.Generic.List<MarkingRegularLine> _;
-                marking.AddFiller(contour, lstyle, out _);
+                var filler = marking.AddFiller(contour, lstyle, out _);
+                FillerIdMap.Remember(cmd, filler);
                 LogApplied(cmd);
             }
             catch (System.Exception ex) { Log.Error("AddFiller apply threw: " + ex); }
@@ -287,12 +321,24 @@ namespace CSM.IMTSync.Handlers
             Marking marking = null;
             if (cmd.PreviewKind != ToolPreviewKind.None)
                 marking = ResolveMarking(cmd);
-            Log.Info($"ToolPreview recv {cmd.PreviewKind} from sender {cmd.SenderId} on {cmd.Scope} {cmd.MarkingId} marking={(marking == null ? "null" : "ok")} hasB={cmd.HasB} verts={(cmd.Vertices == null ? 0 : cmd.Vertices.Length)}");
             PresenceStore.UpdatePreview(cmd.SenderId, cmd, marking);
+            SnapshotDeferral.FlushReady();
         }
 
         private static void ApplyRemoveFiller(Marking marking, IMTActionCommand cmd)
         {
+            if (FillerIdMap.TryGet(cmd, marking, out var mappedFiller))
+            {
+                try
+                {
+                    marking.RemoveFiller(mappedFiller);
+                    FillerIdMap.Forget(cmd);
+                    LogApplied(cmd);
+                }
+                catch (System.Exception ex) { Log.Error("RemoveFiller mapped apply threw: " + ex); }
+                return;
+            }
+
             // v2 path
             if (cmd.Vertices != null && cmd.Vertices.Length > 0)
             {
@@ -308,7 +354,7 @@ namespace CSM.IMTSync.Handlers
                 }
                 if (match == null) { Log.Info("RemoveFiller: no matching filler on this client (no-op)."); return; }
                 if (matchCount > 1) Log.Warn($"RemoveFiller: {matchCount} fillers matched contour; removing first.");
-                try { marking.RemoveFiller(match); LogApplied(cmd); }
+                try { marking.RemoveFiller(match); FillerIdMap.Forget(cmd); LogApplied(cmd); }
                 catch (System.Exception ex) { Log.Error("RemoveFiller apply threw: " + ex); }
                 return;
             }
@@ -344,7 +390,7 @@ namespace CSM.IMTSync.Handlers
 
             if (lmatch == null) { Log.Info("RemoveFiller (legacy): no matching filler on this client (no-op)."); return; }
             if (lcount > 1) Log.Warn($"RemoveFiller (legacy): {lcount} fillers matched contour; removing first.");
-            try { marking.RemoveFiller(lmatch); LogApplied(cmd); }
+            try { marking.RemoveFiller(lmatch); FillerIdMap.Forget(cmd); LogApplied(cmd); }
             catch (System.Exception ex) { Log.Error("RemoveFiller apply threw: " + ex); }
         }
 
@@ -384,6 +430,11 @@ namespace CSM.IMTSync.Handlers
             {
                 foreach (var m in SingletonManager<NodeMarkingManager>.Instance)
                 {
+                    if (PresenceStore.HasActiveConstruction(MarkingScope.Node, m.Id))
+                    {
+                        SnapshotDeferral.Request(MarkingScope.Node, m.Id, "snapshot request while construction preview is active");
+                        continue;
+                    }
                     var snap = MarkingSnapshotter.BuildSnapshot(m);
                     if (snap == null) continue;
                     CsmBridge.SendToAll(snap);
@@ -396,6 +447,11 @@ namespace CSM.IMTSync.Handlers
             {
                 foreach (var m in SingletonManager<SegmentMarkingManager>.Instance)
                 {
+                    if (PresenceStore.HasActiveConstruction(MarkingScope.Segment, m.Id))
+                    {
+                        SnapshotDeferral.Request(MarkingScope.Segment, m.Id, "snapshot request while construction preview is active");
+                        continue;
+                    }
                     var snap = MarkingSnapshotter.BuildSnapshot(m);
                     if (snap == null) continue;
                     CsmBridge.SendToAll(snap);
@@ -409,12 +465,19 @@ namespace CSM.IMTSync.Handlers
 
         private static void ApplyMarkingSnapshot(IMTActionCommand cmd)
         {
+            if (PresenceStore.HasActiveConstruction(cmd.Scope, cmd.MarkingId))
+            {
+                Log.Info($"MarkingSnapshot on {cmd.Scope} {cmd.MarkingId} ignored because construction preview is active; server will send a fresh snapshot after it goes quiet.");
+                return;
+            }
+
             // Wrap in IgnoreScope so the burst of Add* invocations from FromXml don't re-broadcast.
             try
             {
                 using (CsmBridge.StartIgnore())
                 {
-                    MarkingSnapshotter.TryApply(cmd);
+                    if (MarkingSnapshotter.TryApply(cmd))
+                        ImtUiRefresh.Request(cmd.Scope, cmd.MarkingId);
                 }
             }
             catch (Exception ex) { Log.Error("ApplyMarkingSnapshot threw: " + ex); }
@@ -490,6 +553,50 @@ namespace CSM.IMTSync.Handlers
 
         // ----- Style edits -----
 
+        private static void ApplyUpdateLineState(Marking marking, IMTActionCommand cmd)
+        {
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var p1))
+            { Log.Info("UpdateLineState: cannot resolve start point " + DescribePointRef(cmd.A)); return; }
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var p2))
+            { Log.Info("UpdateLineState: cannot resolve end point " + DescribePointRef(cmd.B)); return; }
+            if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
+            { Log.Info("UpdateLineState: line not present on this client"); return; }
+
+            ApplyLineXml(marking, line, cmd.LineXml, "UpdateLineState");
+            LogApplied(cmd);
+        }
+
+        private static void ApplyLineXml(Marking marking, MarkingLine line, string xml, string context)
+        {
+            if (line == null) { Log.Warn(context + ": line is null"); return; }
+            var elem = StyleSerializer.LoadXml(xml);
+            if (elem == null) { Log.Warn(context + ": failed to parse line XML"); return; }
+
+            try
+            {
+                var map = new ObjectsMap(false, false);
+                elem.SetAttributeValue(nameof(MarkingLine.Id), line.Id);
+                elem.SetAttributeValue("T", (int)line.Type);
+                ClearRegularLineRules(line);
+                line.FromXml(elem, map, false, false);
+                marking.Update(line, true, true);
+            }
+            catch (Exception ex) { Log.Error(context + " apply line XML threw: " + ex); }
+        }
+
+        private static void ClearRegularLineRules(MarkingLine line)
+        {
+            var regLine = line as MarkingRegularLine;
+            if (regLine == null) return;
+
+            try
+            {
+                var rules = RegularLineRawRulesField?.GetValue(regLine) as IList;
+                rules?.Clear();
+            }
+            catch (Exception ex) { Log.Warn("ClearRegularLineRules threw: " + ex.Message); }
+        }
+
         private static void ApplyUpdateLineStyle(Marking marking, IMTActionCommand cmd)
         {
             if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var p1))
@@ -506,11 +613,24 @@ namespace CSM.IMTSync.Handlers
             { Log.Warn("UpdateLineStyle: failed to parse style XML"); return; }
             Log.Info("UpdateLineStyle parsed " + StyleDiagnostics.Describe(style));
 
-            MarkingLineRawRule firstRule = null;
-            foreach (var r in regLine.Rules) { firstRule = r; break; }
-            if (firstRule == null) { Log.Warn("UpdateLineStyle: enumerator returned no rule"); return; }
+            MarkingLineRawRule targetRule = null;
+            var currentIndex = 0;
+            foreach (var r in regLine.Rules)
+            {
+                if (currentIndex == cmd.RuleIndex)
+                {
+                    targetRule = r;
+                    break;
+                }
+                currentIndex++;
+            }
+            if (targetRule == null)
+            {
+                Log.Warn($"UpdateLineStyle: rule {cmd.RuleIndex} not present; this client has {regLine.RuleCount} rules");
+                return;
+            }
 
-            try { firstRule.Style.Value = style; LogApplied(cmd); }
+            try { targetRule.Style.Value = style; LogApplied(cmd); }
             catch (Exception ex) { Log.Error("UpdateLineStyle apply threw: " + ex); }
         }
 
@@ -522,14 +642,47 @@ namespace CSM.IMTSync.Handlers
             { Log.Warn("UpdateFillerStyle: failed to parse style XML"); return; }
             Log.Info("UpdateFillerStyle parsed " + StyleDiagnostics.Describe(style));
 
+            if (FillerIdMap.TryGet(cmd, marking, out var mappedFiller))
+            {
+                try
+                {
+                    mappedFiller.Style.Value = style;
+                    LogApplied(cmd);
+                }
+                catch (Exception ex) { Log.Error("UpdateFillerStyle mapped apply threw: " + ex); }
+                return;
+            }
+
             var wantedFp = FillerVertexConverter.Fingerprint(cmd.Vertices);
+            var wantedPoints = FillerVertexConverter.PointKeySet(cmd.Vertices);
             MarkingFiller match = null;
             int matchCount = 0;
+            MarkingFiller best = null;
+            int bestScore = -1;
+            int fillerCount = 0;
             foreach (var f in marking.Fillers)
             {
                 if (f?.Contour == null) continue;
+                fillerCount++;
                 if (!FillerVertexConverter.TryFromContour(f.Contour.RawVertices, out var fverts)) continue;
                 if (FillerVertexConverter.Fingerprint(fverts) == wantedFp) { match = f; matchCount++; }
+
+                var score = SharedPointCount(wantedPoints, FillerVertexConverter.PointKeySet(fverts));
+                if (score > bestScore)
+                {
+                    best = f;
+                    bestScore = score;
+                }
+            }
+            if (match == null && fillerCount == 1 && best != null)
+            {
+                match = best;
+                Log.Warn("UpdateFillerStyle: exact contour miss; applying to only filler on marking.");
+            }
+            if (match == null && best != null && bestScore >= 3)
+            {
+                match = best;
+                Log.Warn($"UpdateFillerStyle: exact contour miss; applying best point-overlap match score={bestScore}.");
             }
             if (match == null) { Log.Info("UpdateFillerStyle: no matching filler on this client"); return; }
             if (matchCount > 1) Log.Warn($"UpdateFillerStyle: {matchCount} fillers matched; applying to first.");
@@ -538,8 +691,25 @@ namespace CSM.IMTSync.Handlers
             catch (Exception ex) { Log.Error("UpdateFillerStyle apply threw: " + ex); }
         }
 
+        private static int SharedPointCount(System.Collections.Generic.HashSet<string> left, System.Collections.Generic.HashSet<string> right)
+        {
+            if (left == null || right == null) return 0;
+            var count = 0;
+            foreach (var key in left)
+            {
+                if (right.Contains(key)) count++;
+            }
+            return count;
+        }
+
         private static void ApplyUpdateCrosswalkStyle(Marking marking, IMTActionCommand cmd)
         {
+            if (!string.IsNullOrEmpty(cmd.CrosswalkXml))
+            {
+                ApplyCrosswalkXml(marking, cmd, "UpdateCrosswalkStyle");
+                return;
+            }
+
             if (!StyleSerializer.TryFromXml<BaseCrosswalkStyle>(cmd.StyleXml, out var style))
             { Log.Warn("UpdateCrosswalkStyle: failed to parse style XML"); return; }
             Log.Info("UpdateCrosswalkStyle parsed " + StyleDiagnostics.Describe(style));
@@ -560,13 +730,93 @@ namespace CSM.IMTSync.Handlers
             }
             if (match == null) { Log.Info("UpdateCrosswalkStyle: no MarkingCrosswalk references this line"); return; }
 
-            try { match.Style.Value = style; LogApplied(cmd); }
+            if (!TryResolveOptionalBorder(marking, cmd.HasRightBorder, cmd.RightBorderA, cmd.RightBorderB, "right", out var rightBorder))
+                return;
+            if (!TryResolveOptionalBorder(marking, cmd.HasLeftBorder, cmd.LeftBorderA, cmd.LeftBorderB, "left", out var leftBorder))
+                return;
+
+            try
+            {
+                match.RightBorder.Value = rightBorder;
+                match.LeftBorder.Value = leftBorder;
+                match.Style.Value = style;
+                LogApplied(cmd);
+            }
             catch (Exception ex) { Log.Error("UpdateCrosswalkStyle apply threw: " + ex); }
+        }
+
+        private static void ApplyUpdateCrosswalkState(Marking marking, IMTActionCommand cmd)
+        {
+            ApplyCrosswalkXml(marking, cmd, "UpdateCrosswalkState");
+            LogApplied(cmd);
+        }
+
+        private static void ApplyCrosswalkXml(Marking marking, IMTActionCommand cmd, string context)
+        {
+            var styleXml = cmd.StyleXml;
+            if (string.IsNullOrEmpty(styleXml))
+            {
+                var elem = StyleSerializer.LoadXml(cmd.CrosswalkXml);
+                var styleElem = elem?.Element(IMT.Manager.Style.XmlName);
+                styleXml = StyleSerializer.ToXml(styleElem);
+            }
+
+            if (!StyleSerializer.TryFromXml<BaseCrosswalkStyle>(styleXml, out var style))
+            { Log.Warn(context + ": failed to parse crosswalk style XML"); return; }
+
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.A, out var p1))
+            { Log.Info(context + ": cannot resolve start point " + DescribePointRef(cmd.A)); return; }
+            if (!PointResolver.TryResolveInternalPoint(marking, cmd.B, out var p2))
+            { Log.Info(context + ": cannot resolve end point " + DescribePointRef(cmd.B)); return; }
+            if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
+            { Log.Info(context + ": underlying crosswalk line not present"); return; }
+            var cwLine = line as MarkingCrosswalkLine;
+            if (cwLine == null) { Log.Warn($"{context}: line is not a CrosswalkLine ({line.GetType().Name})"); return; }
+
+            MarkingCrosswalk match = cwLine.Crosswalk;
+            if (match == null)
+            {
+                foreach (var cw in marking.Crosswalks)
+                {
+                    if (cw?.CrosswalkLine == cwLine) { match = cw; break; }
+                }
+            }
+            if (match == null) { Log.Info(context + ": no MarkingCrosswalk references this line"); return; }
+
+            if (!TryResolveOptionalBorder(marking, cmd.HasRightBorder, cmd.RightBorderA, cmd.RightBorderB, "right", out var rightBorder))
+                return;
+            if (!TryResolveOptionalBorder(marking, cmd.HasLeftBorder, cmd.LeftBorderA, cmd.LeftBorderB, "left", out var leftBorder))
+                return;
+
+            try
+            {
+                match.RightBorder.Value = rightBorder;
+                match.LeftBorder.Value = leftBorder;
+                match.Style.Value = style;
+            }
+            catch (Exception ex) { Log.Error(context + " apply threw: " + ex); }
+        }
+
+        private static bool TryResolveOptionalBorder(Marking marking, bool hasBorder, PointRef a, PointRef b, string name, out MarkingRegularLine border)
+        {
+            border = null;
+            if (!hasBorder) return true;
+            if (!PointResolver.TryResolveInternalPoint(marking, a, out var p1))
+            { Log.Info($"UpdateCrosswalkStyle: cannot resolve {name} border start {DescribePointRef(a)}"); return false; }
+            if (!PointResolver.TryResolveInternalPoint(marking, b, out var p2))
+            { Log.Info($"UpdateCrosswalkStyle: cannot resolve {name} border end {DescribePointRef(b)}"); return false; }
+            if (!marking.TryGetLine(new MarkingPointPair(p1, p2), out var line) || line == null)
+            { Log.Info($"UpdateCrosswalkStyle: {name} border line not present"); return false; }
+            border = line as MarkingRegularLine;
+            if (border == null)
+            { Log.Warn($"UpdateCrosswalkStyle: {name} border is not regular line ({line.GetType().Name})"); return false; }
+            return true;
         }
 
         private static void LogApplied(IMTActionCommand cmd)
         {
             Log.Info($"Applied remote {cmd.Type} on {cmd.Scope} {cmd.MarkingId}");
+            ImtUiRefresh.Request(cmd.Scope, cmd.MarkingId);
         }
 
         private static string DescribePointRef(PointRef r)

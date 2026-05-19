@@ -79,5 +79,40 @@ namespace CSM.IMTSync.Commands
         [ProtoMember(20)] public bool HasB;
         [ProtoMember(21)] public bool HasHoverVertex;
         [ProtoMember(22)] public FillerVertexRef HoverVertex;
+
+        // UpdateLineStyle: which MarkingLineRawRule on the line changed. Older packets default
+        // to 0, matching the previous first-rule-only behavior.
+        [ProtoMember(23)] public int RuleIndex;
+
+        // Filler identity in the sender's IMT process. IMT's MarkingFiller.Id is runtime-local,
+        // so receivers store a sender->local filler map after AddFiller and use this for later
+        // style/remove commands, falling back to contour matching when no map exists.
+        [ProtoMember(24)] public int FillerId;
+
+        // UpdateCrosswalkStyle: optional border line identities. The crosswalk itself is still
+        // identified by A/B; border lines are regular line endpoint pairs when present.
+        [ProtoMember(25)] public bool HasRightBorder;
+        [ProtoMember(26)] public PointRef RightBorderA;
+        [ProtoMember(27)] public PointRef RightBorderB;
+        [ProtoMember(28)] public bool HasLeftBorder;
+        [ProtoMember(29)] public PointRef LeftBorderA;
+        [ProtoMember(30)] public PointRef LeftBorderB;
+
+        // Full-object state XML. These are IMT's own <L ...> and <C ...> XML chunks. They let us
+        // sync line rule structure, clip-sidewalk/alignment, crosswalk borders, and every nested
+        // style setting without re-modeling IMT's UI surface in protobuf.
+        [ProtoMember(31)] public string LineXml;
+        [ProtoMember(32)] public string CrosswalkXml;
+
+        // Saved template state. TemplateXml is IMT's own <T ...> XML for StyleTemplate or
+        // IntersectionTemplate. TemplateId is the stable Guid string and is also present in XML;
+        // it is duplicated here so delete packets do not need to ship the whole template.
+        [ProtoMember(33)] public string TemplateXml;
+        [ProtoMember(34)] public string TemplateId;
+
+        // Intersection presets store their preview screenshot as a separate PNG file, not inside
+        // IntersectionTemplate.ToXml(). Carry it with preset upserts so the Presets tab receives
+        // the same thumbnail/state IMT expects on disk.
+        [ProtoMember(35)] public byte[] TemplatePreviewPng;
     }
 }

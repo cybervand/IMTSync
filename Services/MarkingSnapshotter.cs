@@ -82,6 +82,12 @@ namespace CSM.IMTSync.Services
 
             try
             {
+                marking.Clear();
+                // Clear() drops the local MarkingFiller instances; any cached FillerIdMap entries
+                // for this marking now point at dead objects. Purge them before FromXml rebuilds
+                // a fresh set so subsequent UpdateFillerStyle / RemoveFiller fall through to
+                // contour matching instead of poking the stale references.
+                FillerIdMap.ForgetMarking(cmd.Scope, cmd.MarkingId);
                 marking.FromXml(version, xml, new ObjectsMap(), needUpdate: true);
                 Log.Info($"Applied MarkingSnapshot on {cmd.Scope} {cmd.MarkingId} (sender IMT v{cmd.ImtVersion}).");
                 return true;
