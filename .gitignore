@@ -27,3 +27,4 @@ local.settings.json
 
 # Ignoring the IMT project files
 NodeMarkup-master/
+/.claude/
